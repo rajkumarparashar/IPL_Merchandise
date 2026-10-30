@@ -1,0 +1,286 @@
+@page "/admin/products/{Id}"
+@attribute [Authorize(Roles = "Admin")]
+@inject ICatalogApi Catalog
+@inject IAdminApi Admin
+@inject NavigationManager Nav
+
+<PageTitle>Admin · Edit @(_product?.Name ?? "product") · IPL Fan Store</PageTitle>
+
+<section class="page-banner" aria-labelledby="edit-title">
+    <div class="page-banner__inner">
+        <h1 id="edit-title">Edit product</h1>
+        <p>@(_product?.Name ?? "Loading product…")</p>
+    </div>
+</section>
+
+<nav aria-label="Breadcrumb" class="breadcrumb">
+    <ol>
+        <li><a href="/"><MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" /> Home</a></li>
+        <li><a href="admin/products">Manage products</a></li>
+        <li aria-current="page">@(_product?.Name ?? "Product")</li>
+    </ol>
+</nav>
+
+<LoadState Loading="_loading" Problem="_loadProblem" OnRetry="ReloadAsync">
+    @if (_product is not null)
+    {
+        @if (_conflict)
+        {
+            @* 412: someone changed the product after we loaded it. Never overwrite silently: show what changed and let the admin decide. *@
+            <div class="admin-alert admin-alert--warning" role="alert" data-testid="conflict">
+                <MudIcon Icon="@Icons.Material.Filled.WarningAmber" />
+                <div>
+                    <strong>Someone else changed this product while you were editing.</strong>
+                    <span>@(_partial ?? "Your changes were not saved.") Reload to see the latest values, then apply your change again if it still makes sense.</span>
+                </div>
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small" OnClick="ReloadAsync">Reload latest</MudButton>
+            </div>
+        }
+        @if (_saved is not null)
+        {
+            <div class="admin-alert admin-alert--success" role="status">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" /><div><strong>@_saved</strong></div>
+            </div>
+        }
+        <ProblemAlert Problem="_problem" />
+
+        <div class="cart-layout">
+            <div class="panel admin-form">
+                <EditForm Model="_details" OnValidSubmit="SaveAsync">
+                    <DataAnnotationsValidator />
+                    <h2 class="checkout-section-title">Product details</h2>
+                    <div class="form-grid">
+                        <MudTextField @bind-Value="_details.Name" For="@(() => _details.Name)" Label="Name" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      UserAttributes="@(new() { ["id"] = "name" })" />
+                        <MudSelect T="string" @bind-Value="_details.FranchiseCode" For="@(() => _details.FranchiseCode)" Label="Franchise" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @foreach (var f in _franchises)
+                            {
+                                <MudSelectItem T="string" Value="f.Code">@f.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <MudSelect T="ProductType?" @bind-Value="_details.Type" For="@(() => _details.Type)" Label="Type" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @foreach (var type in Enum.GetValues<ProductType>())
+                            {
+                                <MudSelectItem T="ProductType?" Value="type">@ProductCard.TypeName(type)</MudSelectItem>
+                            }
+                        </MudSelect>
+                        <div class="admin-form__checks">
+                            <MudCheckBox T="bool" @bind-Value="_details.IsActive" Label="Available for sale" Size="Size.Small" Color="Color.Primary" Dense="true" />
+                            <MudCheckBox T="bool" Value="@(_details.IsFeatured ?? false)" ValueChanged="@(v => _details.IsFeatured = v)" Label="Featured on the home page"
+                                         Size="Size.Small" Color="Color.Primary" Dense="true" />
+                        </div>
+                        <MudTextField @bind-Value="_details.Description" For="@(() => _details.Description)" Label="Description" Lines="3" Variant="Variant.Outlined"
+                                      Margin="Margin.Dense" Class="form-grid__wide" />
+                    </div>
+
+                    <h2 class="checkout-section-title">Photo</h2>
+                    <ImagePicker CurrentUrl="@_product.ImageUrl" Type="@(_details.Type ?? _product.Type)" FranchiseCode="@_details.FranchiseCode"
+                                 @bind-Selected="_image" @bind-Remove="_removeImage" Disabled="_busy" />
+
+                    <div class="admin-form__split">
+                        <div>
+                            <h2 class="checkout-section-title">Price</h2>
+                            <div class="admin-form__stack">
+                                <MudNumericField T="decimal?" @bind-Value="_newPrice" Label="Price (₹, incl. tax)" Format="0.00" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                 HideSpinButtons="true" Error="@_errors.ContainsKey(PriceField)" ErrorText="@_errors.GetValueOrDefault(PriceField)"
+                                                 UserAttributes="@(new() { ["id"] = "new-price" })" />
+                                <MudTextField @bind-Value="_priceReason" Label="Reason for price change" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                              HelperText="@(PriceChanged ? "Required: recorded in the history" : "Only needed if you change the price")"
+                                              Error="@_errors.ContainsKey(PriceReasonField)" ErrorText="@_errors.GetValueOrDefault(PriceReasonField)"
+                                              UserAttributes="@(new() { ["id"] = "price-reason" })" />
+                            </div>
+                        </div>
+                        <div>
+                            <h2 class="checkout-section-title">Stock</h2>
+                            <div class="admin-form__stack">
+                                <MudNumericField T="int?" @bind-Value="_newStock" Label="Units in stock" Min="0" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                 HideSpinButtons="true" Error="@_errors.ContainsKey(StockField)" ErrorText="@_errors.GetValueOrDefault(StockField)"
+                                                 UserAttributes="@(new() { ["id"] = "new-stock" })" />
+                                <MudTextField @bind-Value="_stockReason" Label="Reason for stock change" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                              HelperText="@(StockChanged ? "Required: recorded in the history" : "Only needed if you change the stock")"
+                                              Error="@_errors.ContainsKey(StockReasonField)" ErrorText="@_errors.GetValueOrDefault(StockReasonField)"
+                                              UserAttributes="@(new() { ["id"] = "stock-reason" })" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="admin-form__actions admin-form__actions--page">
+                        <p class="order-detail__note">Price and stock changes are recorded in the product's history with your name and reason.</p>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="Cancel" data-testid="cancel">Cancel</MudButton>
+                        <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" data-testid="save">
+                            @(_busy ? "Saving…" : "Save changes")
+                        </MudButton>
+                    </div>
+                </EditForm>
+            </div>
+
+            <AdminProductPreview Product="_product" />
+        </div>
+    }
+</LoadState>
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private const string PriceField = "price", PriceReasonField = "priceReason", StockField = "stock", StockReasonField = "stockReason";
+
+    /// <summary>One pending change: a label for messages and the API call, which receives the current ETag.</summary>
+    private sealed record SaveStep(string Label, Func<string, Task<ApiResult<ProductDto>>> Send);
+
+    private ProductDto? _product;            // the last version loaded or saved: the baseline changes are measured against
+    private IReadOnlyList<FranchiseDto> _franchises = [];
+    private ApiProblem? _loadProblem;
+    private ApiProblem? _problem;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _conflict;
+    private string? _saved;
+    private string? _partial;
+    private readonly Dictionary<string, string> _errors = new();
+
+    private UpdateProductRequest _details = new();
+    private decimal? _newPrice;
+    private string _priceReason = "";
+    private int? _newStock;
+    private string _stockReason = "";
+    private ImageUpload? _image;       // new photo chosen, sent on Save
+    private bool _removeImage;         // remove the current photo on Save
+
+    private bool PriceChanged => _product is not null && _newPrice != _product.Price;
+    private bool StockChanged => _product is not null && _newStock != _product.StockQuantity;
+    private bool DetailsChanged => _product is not null && (
+        _details.Name.Trim() != _product.Name || _details.Type != _product.Type || _details.FranchiseCode != _product.FranchiseCode ||
+        (_details.Description ?? "").Trim() != _product.Description || _details.IsActive != _product.IsActive ||
+        (_details.IsFeatured ?? false) != (_product.IsFeatured ?? false));
+
+    protected override async Task OnInitializedAsync() => _franchises = (await Catalog.GetFranchisesAsync()).Value ?? [];
+
+    protected override Task OnParametersSetAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _conflict = false;
+        _problem = null;
+        _partial = null;
+        _errors.Clear();
+        var result = await Catalog.GetAsync(Id);
+        _loading = false;
+        _loadProblem = result.Problem;
+        if (result.Value is { } p) Apply(p);
+    }
+
+    private void Apply(ProductDto p)
+    {
+        _product = p;
+        _details = new UpdateProductRequest { Name = p.Name, Type = p.Type, FranchiseCode = p.FranchiseCode, Description = p.Description, IsActive = p.IsActive, IsFeatured = p.IsFeatured ?? false };
+        _newPrice = p.Price;
+        _priceReason = "";
+        _newStock = p.StockQuantity;
+        _stockReason = "";
+        _image = null;
+        _removeImage = false;
+    }
+
+    // Leave without saving: unsaved edits are simply discarded (nothing was sent to the server).
+    private void Cancel() => Nav.NavigateTo("admin/products");
+
+    /// <summary>
+    /// The single Save: builds the list of changed parts (details, price, stock, photo), validates them, then runs them in order.
+    /// Each step sends the ETag returned by the previous one, so our own consecutive writes never conflict with each other.
+    /// </summary>
+    private async Task SaveAsync()
+    {
+        if (_busy || _product is null) return;
+        _saved = null;
+        _problem = null;
+        _conflict = false;
+        _partial = null;
+
+        if (!Validate()) return;
+        var steps = BuildSteps();
+        if (steps.Count == 0)
+        {
+            _saved = "No changes to save.";
+            return;
+        }
+
+        _busy = true;
+        var done = new List<string>();
+        try
+        {
+            foreach (var step in steps)
+            {
+                var result = await step.Send(_product.ETag);
+                if (!result.IsSuccess)
+                {
+                    ReportFailure(step, done, result.Problem!);
+                    return;
+                }
+                _product = result.Value!;            // new baseline and ETag; a later retry will not resend this part
+                done.Add(step.Label);
+            }
+            Apply(_product);
+            _saved = $"Saved {Join(done)}.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private List<SaveStep> BuildSteps()
+    {
+        var steps = new List<SaveStep>();
+        if (DetailsChanged)
+            steps.Add(new("details", etag => Admin.UpdateDetailsAsync(Id, _details, etag)));
+        if (PriceChanged)
+            steps.Add(new("price", etag => Admin.ChangePriceAsync(Id, new ChangePriceRequest { Price = _newPrice, Reason = _priceReason.Trim() }, etag)));
+        if (StockChanged)
+            steps.Add(new("stock", etag => Admin.SetStockAsync(Id, new SetStockRequest { StockQuantity = _newStock, Reason = _stockReason.Trim() }, etag)));
+        if (_image is { } image)
+            steps.Add(new("photo", etag => Admin.UploadImageAsync(Id, image, etag)));
+        else if (_removeImage && _product?.ImageUrl is not null)
+            steps.Add(new("photo", etag => Admin.RemoveImageAsync(Id, etag)));
+        return steps;
+    }
+
+    /// <summary>Details are validated by the form (DataAnnotations); price and stock rules depend on whether they changed.</summary>
+    private bool Validate()
+    {
+        _errors.Clear();
+        if (PriceChanged)
+        {
+            if (_newPrice is not { } price || price < 0.01m || price > 1_000_000m || decimal.Round(price, 2) != price)
+                _errors[PriceField] = "Enter a price between ₹0.01 and ₹10,00,000.00 with at most two decimals.";
+            if (_priceReason.Trim().Length < 3)
+                _errors[PriceReasonField] = "Give a reason for the price change (at least 3 characters).";
+        }
+        if (StockChanged)
+        {
+            if (_newStock is not { } stock || stock < 0 || stock > 100_000)
+                _errors[StockField] = "Enter a stock level between 0 and 100,000.";
+            if (_stockReason.Trim().Length < 3)
+                _errors[StockReasonField] = "Give a reason for the stock change (at least 3 characters).";
+        }
+        return _errors.Count == 0;
+    }
+
+    private void ReportFailure(SaveStep failed, List<string> done, ApiProblem problem)
+    {
+        var savedPart = done.Count > 0 ? $"Saved {Join(done)}; " : "";
+        if (problem.IsConcurrencyConflict)
+        {
+            _conflict = true;
+            _partial = $"{savedPart}{failed.Label} was not saved.";
+        }
+        else
+        {
+            _problem = problem;
+            if (done.Count > 0) _saved = $"Saved {Join(done)}. {char.ToUpper(failed.Label[0])}{failed.Label[1..]} was not saved; see below.";
+        }
+    }
+
+    private static string Join(List<string> parts) =>
+        parts.Count <= 1 ? string.Join("", parts) : string.Join(", ", parts.Take(parts.Count - 1)) + " and " + parts[^1];
+}

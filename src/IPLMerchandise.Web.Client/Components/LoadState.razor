@@ -1,0 +1,28 @@
+@* Loading → failure (with Retry) → content. Every page that fetches data uses this, so the three states look the same everywhere. *@
+@if (Loading)
+{
+    <div class="d-flex align-center gap-2 my-6" role="status" aria-live="polite">
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" aria-hidden="true" />
+        <span>@LoadingText</span>
+    </div>
+}
+else if (Problem is not null)
+{
+    <ProblemAlert Problem="Problem" OnRetry="OnRetry" />
+    @if (!Problem.IsTransient && OnRetry.HasDelegate)
+    {
+        <MudButton Variant="Variant.Outlined" OnClick="OnRetry">Try again</MudButton>
+    }
+}
+else
+{
+    @ChildContent
+}
+
+@code {
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public ApiProblem? Problem { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public string LoadingText { get; set; } = "Loading…";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -1,0 +1,172 @@
+@page "/orders/{Id:guid}"
+@attribute [Authorize(Roles = "Customer")]
+@inject IOrdersApi Orders
+@inject UserTimeZone TimeZone
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<PageTitle>@(_order is null ? "Order" : $"Order {OrderNumber.Format(_order.Id)}") · IPL Fan Store</PageTitle>
+
+<section class="page-banner" aria-labelledby="order-title">
+    <div class="page-banner__inner">
+        <h1 id="order-title">@(_order is null ? "Order details" : $"Order {OrderNumber.Format(_order.Id)}")</h1>
+        <p>@(_order is null ? "Loading your order…" : $"Placed {TimeZone.Format(_order.CreatedAtUtc)}")</p>
+    </div>
+</section>
+
+<nav aria-label="Breadcrumb" class="breadcrumb">
+    <ol>
+        <li><a href="/"><MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" /> Home</a></li>
+        <li><a href="orders">My Orders</a></li>
+        <li aria-current="page">@(_order is null ? "Order" : OrderNumber.Format(_order.Id))</li>
+    </ol>
+</nav>
+
+<LoadState Loading="_loading" Problem="_problem" OnRetry="LoadAsync">
+    @if (_order is not null)
+    {
+        @if (Placed)
+        {
+            <div class="order-confirmed" role="status" data-testid="order-confirmed">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" />
+                <div>
+                    <strong>Thank you! Your order is confirmed.</strong>
+                    <span>We've reserved your items. You'll pay @Money.Format(_order.Total) in cash on delivery.</span>
+                </div>
+            </div>
+        }
+
+        <div class="cart-layout">
+            <div class="panel order-detail">
+                <div class="order-detail__meta">
+                    <div>
+                        <span class="order-detail__label">Order ID</span>
+                        <span class="order-detail__value">
+                            @OrderNumber.Format(_order.Id)
+                            <button type="button" class="icon-link" aria-label="Copy order number" @onclick="CopyAsync">
+                                <MudIcon Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" />
+                            </button>
+                        </span>
+                    </div>
+                    <div>
+                        <span class="order-detail__label">Order Date</span>
+                        <span class="order-detail__value">@TimeZone.Format(_order.CreatedAtUtc)</span>
+                    </div>
+                    <div>
+                        <span class="order-detail__label">Items</span>
+                        <span class="order-detail__value">@_order.Lines.Sum(l => l.Quantity)</span>
+                    </div>
+                    <div>
+                        <span class="order-detail__label">Status</span>
+                        <span class="status-chip status-chip--@_order.Status.ToString().ToLowerInvariant()">
+                            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" /> @_order.Status
+                        </span>
+                    </div>
+                </div>
+
+                <h2 class="checkout-section-title">Items in this order</h2>
+                <table class="cart-table">
+                    <caption class="sr-only">Items in this order</caption>
+                    <thead>
+                        <tr><th scope="col">Product</th><th scope="col">Price</th><th scope="col">Qty</th><th scope="col">Total</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var line in _order.Lines)
+                        {
+                            var colours = MerchArt.ColoursFor(line.FranchiseCode);
+                            <tr data-testid="order-line">
+                                <td>
+                                    <div class="cart-product">
+                                        <a href="@($"products/{line.ProductId}")" class="cart-product__thumb" tabindex="-1" aria-hidden="true"
+                                           style="@($"background: radial-gradient(circle at 50% 45%, {colours.Primary}66 0%, transparent 65%), linear-gradient(160deg, #13245a, #0a1636)")">
+                                            <ProductPhoto ImageUrl="@line.ImageUrl" Type="@(line.Type ?? ProductType.Other)" FranchiseCode="@line.FranchiseCode" />
+                                        </a>
+                                        <div>
+                                            <a href="@($"products/{line.ProductId}")" class="cart-product__name">@line.ProductName</a>
+                                            <div class="cart-product__meta">
+                                                @(line.FranchiseName ?? line.FranchiseCode)@(line.Type is { } t ? $" · {ProductCard.TypeName(t)}" : "")
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td data-label="Price"><Rupees Amount="line.UnitPrice" /></td>
+                                <td data-label="Qty">@line.Quantity</td>
+                                <td data-label="Total" class="cart-table__total"><Rupees Amount="line.LineTotal" /></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <p class="order-detail__note">Prices are as charged when the order was placed; later catalogue changes don't affect this order.</p>
+
+                <div class="cart-footer">
+                    <a href="orders" class="cart-footer__continue"><MudIcon Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" /> Back to My Orders</a>
+                    <a href="shop" class="cart-footer__continue">Continue Shopping <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" /></a>
+                </div>
+            </div>
+
+            <aside class="panel order-summary" aria-labelledby="summary-title">
+                <h2 id="summary-title">Order Summary</h2>
+                <dl>
+                    <dt>Subtotal (@_order.Lines.Sum(l => l.Quantity) items)</dt><dd><Rupees Amount="_order.Subtotal" /></dd>
+                    <dt>Taxes</dt><dd>Included in prices</dd>
+                    <dt>Shipping</dt><dd class="@(_order.ShippingFee == 0 ? "is-free" : "")">@(_order.ShippingFee == 0 ? "FREE" : Money.Format(_order.ShippingFee))</dd>
+                </dl>
+                <div class="order-summary__total"><span>Total</span><span data-testid="order-total"><Rupees Amount="_order.Total" /></span></div>
+
+                <div class="order-detail__block">
+                    <h3><MudIcon Icon="@Icons.Material.Outlined.LocalShipping" Size="Size.Small" /> Delivery address</h3>
+                    @if (_order.ShippingAddress is { } a)
+                    {
+                        <address data-testid="order-address">
+                            <strong>@a.FullName</strong><br />
+                            @a.Line1@(string.IsNullOrWhiteSpace(a.Line2) ? "" : $", {a.Line2}")<br />
+                            @a.City, @a.State @a.PinCode<br />
+                            +91 @a.Mobile
+                        </address>
+                    }
+                    else
+                    {
+                        <p>No delivery address was recorded for this order.</p>
+                    }
+                </div>
+                <div class="order-detail__block">
+                    <h3><MudIcon Icon="@Icons.Material.Outlined.Payments" Size="Size.Small" /> Payment</h3>
+                    <p>Cash on Delivery: pay @Money.Format(_order.Total) when your order arrives.</p>
+                </div>
+            </aside>
+        </div>
+    }
+</LoadState>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [SupplyParameterFromQuery] public bool Placed { get; set; }
+
+    private OrderDto? _order;
+    private ApiProblem? _problem;
+    private bool _loading = true;
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await Orders.GetAsync(Id);
+        _order = result.Value;
+        _problem = result.Problem;
+        _loading = false;
+    }
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", OrderNumber.Format(_order!.Id));
+            Snackbar.Add($"Copied {OrderNumber.Format(_order.Id)}", Severity.Success);
+        }
+        catch (JSException)
+        {
+            Snackbar.Add("Could not copy the order number.", Severity.Warning);
+        }
+    }
+}

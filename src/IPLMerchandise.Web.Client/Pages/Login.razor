@@ -1,0 +1,52 @@
+@page "/login"
+@inject IAuthApi AuthApi
+@inject JwtAuthStateProvider AuthProvider
+@inject CartState Cart
+@inject NavigationManager Nav
+
+<PageTitle>Sign in</PageTitle>
+<MudPaper Class="pa-6 mx-auto" MaxWidth="420px" Elevation="1">
+    <MudText Typo="Typo.h4" HtmlTag="h1" Class="mb-4">Sign in</MudText>
+
+    <EditForm Model="_model" OnValidSubmit="SubmitAsync">
+        <DataAnnotationsValidator />
+        <MudTextField @bind-Value="_model.Email" For="@(() => _model.Email)" Label="Email" InputType="InputType.Email"
+                      Variant="Variant.Outlined" Class="mb-3" UserAttributes="@(new() { ["autocomplete"] = "email", ["id"] = "email" })" />
+        <MudTextField @bind-Value="_model.Password" For="@(() => _model.Password)" Label="Password" InputType="InputType.Password"
+                      Variant="Variant.Outlined" Class="mb-3" UserAttributes="@(new() { ["autocomplete"] = "current-password", ["id"] = "password" })" />
+        <ProblemAlert Problem="_problem" />
+        <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Disabled="_busy">
+            @(_busy ? "Signing in…" : "Sign in")
+        </MudButton>
+    </EditForm>
+    <MudText Class="mt-4">New here? <MudLink Href="register">Create an account</MudLink></MudText>
+</MudPaper>
+
+@code {
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+
+    private readonly LoginRequest _model = new();
+    private ApiProblem? _problem;
+    private bool _busy;
+
+    private async Task SubmitAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        _problem = null;
+        var result = await AuthApi.LoginAsync(_model);
+        _busy = false;
+        if (!result.IsSuccess)
+        {
+            _problem = result.Problem;
+            return;
+        }
+        await AuthProvider.SignInAsync(result.Value!);
+        if (result.Value!.User.Roles.Contains("Customer")) await Cart.LoadAsync();
+        Nav.NavigateTo(SafeReturnUrl(ReturnUrl));
+    }
+
+    /// <summary>Only local paths: an attacker-supplied returnUrl must not send the user to another site.</summary>
+    internal static string SafeReturnUrl(string? url) =>
+        string.IsNullOrEmpty(url) || url.Contains("://") || url.StartsWith("//") || url.StartsWith('\\') ? "" : url.TrimStart('/');
+}

@@ -1,0 +1,91 @@
+<article class="product-card" data-testid="product-card">
+    @* The picture is a shortcut to the details page for mouse users; keyboard and screen-reader users get the title link. *@
+    <a href="@DetailsUrl" class="product-card__media" tabindex="-1" aria-hidden="true" style="@MediaBackground">
+        <ProductPhoto ImageUrl="@Product.ImageUrl" Type="Product.Type" FranchiseCode="@Product.FranchiseCode" />
+        @if (Product.IsLimitedEdition)
+        {
+            <span class="product-card__badge">Limited Edition</span>
+        }
+        @if (Product.IsFeatured == true)
+        {
+            <span class="product-card__ribbon" data-testid="featured-ribbon">★ Featured</span>
+        }
+    </a>
+    <div class="product-card__body">
+        <h2 class="product-card__title">
+            <a href="@DetailsUrl">@Product.Name</a>
+            @if (Product.IsFeatured == true)
+            {
+                <span class="sr-only">(featured product)</span>
+            }
+        </h2>
+        <p class="product-card__meta">@Product.FranchiseName · @TypeName(Product.Type)</p>
+        <div class="product-card__price-row">
+            <div>
+                <div class="product-card__price"><Rupees Amount="Product.Price" /></div>
+                <div class="product-card__tax">(Incl. of all taxes)</div>
+            </div>
+            <StockBadge Status="Product.StockStatus" Quantity="Product.StockQuantity" />
+        </div>
+        @if (Product.IsLimitedEdition && Product.StockStatus != StockStatus.OutOfStock)
+        {
+            @* Stock can be higher than what one customer may buy: say so, or "Only 3 left" looks like a broken promise. *@
+            <p class="product-card__limit" data-testid="order-limit">Limited edition · limit @PerOrderLimit per order</p>
+        }
+    </div>
+    @if (OnAddToCart.HasDelegate)
+    {
+        <div class="product-card__actions">
+            @if (CanAdd)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Outlined.ShoppingCart"
+                           OnClick="() => OnAddToCart.InvokeAsync(Product)" Disabled="Adding" Class="card-add-button"
+                           aria-label="@($"Add {Product.Name} to cart")" aria-busy="@(Adding ? "true" : "false")" data-testid="card-add-to-cart">
+                    @* Same label while saving: changing the text resized the button and made "Details" jump. *@
+                    Add to cart
+                </MudButton>
+            }
+            else if (Product.StockStatus != StockStatus.OutOfStock)
+            {
+                <span class="product-card__note" data-testid="limit-reached">@LimitReachedText</span>
+            }
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Href="@DetailsUrl" aria-label="@($"View details of {Product.Name}")">Details</MudButton>
+        </div>
+    }
+</article>
+
+@code {
+    [Parameter, EditorRequired] public ProductDto Product { get; set; } = default!;
+
+    /// <summary>When set, the card shows "Add to cart" (quantity 1) and "Details" buttons.</summary>
+    [Parameter] public EventCallback<ProductDto> OnAddToCart { get; set; }
+
+    /// <summary>False when there is nothing left to add (out of stock, or the cart already holds the maximum).</summary>
+    [Parameter] public bool CanAdd { get; set; } = true;
+
+    /// <summary>True while this card's product is being added: the button is disabled.</summary>
+    [Parameter] public bool Adding { get; set; }
+
+    /// <summary>Units of this product already in the cart, to explain why nothing more can be added.</summary>
+    [Parameter] public int InCart { get; set; }
+
+    private int PerOrderLimit => ProductLimits.PerLine(Product);
+
+    // Which rule stopped the customer: the per-order limit, or the stock (all of it is already in their cart).
+    private string LimitReachedText => InCart >= PerOrderLimit
+        ? $"Limit of {PerOrderLimit} per order reached"
+        : $"All {Product.StockQuantity} available are in your cart";
+
+    private (string Primary, string Secondary) _colours;
+    private string DetailsUrl => $"products/{Product.Id}";
+
+    // Photos are shown whole on a light backdrop; illustrations get the dark "stadium" backdrop with a glow in the team's colour.
+    private string MediaBackground => Product.ImageUrl is not null ? PhotoBackdrop :
+        $"background: radial-gradient(circle at 50% 45%, {_colours.Primary}66 0%, transparent 62%), linear-gradient(160deg, #13245a 0%, #0a1636 100%)";
+
+    protected override void OnParametersSet() => _colours = MerchArt.ColoursFor(Product.FranchiseCode);
+
+    internal const string PhotoBackdrop = "background: radial-gradient(circle at 50% 40%, #ffffff 0%, #e8ecf5 75%)";
+
+    public static string TypeName(ProductType type) => type == ProductType.SignedPhotograph ? "Signed photograph" : type.ToString();
+}

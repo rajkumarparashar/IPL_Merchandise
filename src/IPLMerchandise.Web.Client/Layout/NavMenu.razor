@@ -1,0 +1,16 @@
+<nav aria-label="Main" class="site-nav">
+    <NavLink href="/" Match="NavLinkMatch.All" class="site-nav__link" ActiveClass="active">
+        <MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" /><span class="site-nav__label">Home</span>
+    </NavLink>
+    <NavLink href="shop" class="site-nav__link" ActiveClass="active">
+        <MudIcon Icon="@Icons.Material.Filled.Storefront" Size="Size.Small" /><span class="site-nav__label">Shop</span>
+    </NavLink>
+    <NavLink href="orders" class="site-nav__link" ActiveClass="active">
+        <MudIcon Icon="@Icons.Material.Filled.Inventory2" Size="Size.Small" /><span class="site-nav__label">My Orders</span>
+    </NavLink>
+    <AuthorizeView Roles="Admin">
+        <NavLink href="admin/products" class="site-nav__link" ActiveClass="active" data-testid="admin-nav">
+            <MudIcon Icon="@Icons.Material.Filled.AdminPanelSettings" Size="Size.Small" /><span class="site-nav__label">Admin</span>
+        </NavLink>
+    </AuthorizeView>
+</nav>

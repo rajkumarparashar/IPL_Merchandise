@@ -1,0 +1,76 @@
+@* Original vector illustrations of each product type in team colours. No logos or crests: those are trademarks. *@
+<svg viewBox="0 0 200 140" class="merch-art" aria-hidden="true" focusable="false">
+    @switch (Type)
+    {
+        case ProductType.Jersey:
+            <path d="M64 34 L84 24 Q100 36 116 24 L136 34 L158 56 L142 72 L132 64 L132 124 Q100 130 68 124 L68 64 L58 72 L42 56 Z"
+                  fill="@Primary" stroke="rgba(0,0,0,.2)" stroke-width="1.5" />
+            <path d="M100 30 L100 124 Q84 128 68 124 L68 64 L58 72 L42 56 L64 34 L84 24 Q92 30 100 30 Z" fill="#fff" opacity=".07" />
+            <path d="M84 24 Q100 40 116 24" stroke="@Secondary" stroke-width="5" fill="none" stroke-linecap="round" />
+            <path d="M44 58 L58 72 M156 58 L142 72" stroke="@Secondary" stroke-width="5" stroke-linecap="round" />
+            <path d="M70 66 L70 122 M130 66 L130 122" stroke="@Secondary" stroke-width="3" opacity=".75" />
+            break;
+        case ProductType.Cap:
+            <path d="M52 98 C52 58 74 40 100 40 C126 40 148 58 148 98 Z" fill="@Primary" stroke="rgba(0,0,0,.2)" stroke-width="1.5" />
+            <path d="M100 40 L100 98 M78 45 Q70 70 70 98 M122 45 Q130 70 130 98" stroke="rgba(0,0,0,.18)" stroke-width="1.5" fill="none" />
+            <circle cx="100" cy="41" r="4.5" fill="@Secondary" />
+            <path d="M46 96 Q100 84 168 100 Q172 111 156 113 Q104 104 52 107 Q42 103 46 96 Z" fill="@Secondary" />
+            break;
+        case ProductType.Flag:
+            <rect x="40" y="14" width="5" height="118" rx="2" fill="#e5e7eb" />
+            <circle cx="42.5" cy="13" r="5" fill="@Secondary" />
+            <path d="M45 22 C80 10 110 34 165 20 L165 86 C110 100 80 76 45 88 Z" fill="@Primary" stroke="rgba(0,0,0,.2)" stroke-width="1.5" />
+            <path d="M45 70 C80 58 110 82 165 68 L165 86 C110 100 80 76 45 88 Z" fill="@Secondary" />
+            break;
+        case ProductType.SignedPhotograph:
+            <rect x="40" y="14" width="120" height="112" rx="3" fill="#2b1d0e" stroke="#c9a65b" stroke-width="6" />
+            <rect x="52" y="26" width="96" height="88" fill="@Primary" />
+            <g fill="@Secondary" opacity=".9">
+                <circle cx="72" cy="58" r="8" /><rect x="62" y="68" width="20" height="40" rx="8" />
+                <circle cx="100" cy="52" r="9" /><rect x="89" y="63" width="22" height="45" rx="9" />
+                <circle cx="128" cy="58" r="8" /><rect x="118" y="68" width="20" height="40" rx="8" />
+            </g>
+            <path d="M60 100 C70 86 76 106 86 94 S100 86 108 98 S124 92 140 90" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" />
+            break;
+        default:
+            <rect x="58" y="52" width="84" height="70" rx="4" fill="@Primary" />
+            <rect x="52" y="40" width="96" height="16" rx="3" fill="@Secondary" />
+            <rect x="96" y="40" width="8" height="82" fill="@Secondary" />
+            break;
+    }
+    @* Label (franchise code) drawn outside the switch: Razor reserves <text> inside code blocks. *@
+    <text x="@_label.X" y="@_label.Y" text-anchor="middle" font-size="@_label.Size" font-weight="800" fill="@_label.Fill">@(_label.Show ? Label : null)</text>
+</svg>
+
+@code {
+    [Parameter, EditorRequired] public ProductType Type { get; set; }
+    [Parameter] public string Primary { get; set; } = "#1b3fa0";
+    [Parameter] public string Secondary { get; set; } = "#f2c14e";
+    [Parameter] public string? Label { get; set; }
+
+    private (int X, int Y, int Size, string Fill, bool Show) _label;
+
+    protected override void OnParametersSet() => _label = Type switch
+    {
+        ProductType.Jersey => (100, 94, 22, Secondary, true),
+        ProductType.Cap => (100, 82, 18, Secondary, true),
+        ProductType.Flag => (106, 56, 20, "#fff", true),
+        _ => (0, 0, 0, "none", false)
+    };
+
+    /// <summary>Team colours (primary, secondary) for placeholder art.</summary>
+    public static (string Primary, string Secondary) ColoursFor(string franchiseCode) => franchiseCode switch
+    {
+        "MI" => ("#004BA0", "#D1AB3E"),
+        "CSK" => ("#F9CD05", "#1A3D8F"),
+        "RCB" => ("#D11D26", "#1C1C1C"),
+        "KKR" => ("#3A225D", "#B3A123"),
+        "SRH" => ("#FF822A", "#1C1C1C"),
+        "RR" => ("#EA1A85", "#254AA5"),
+        "DC" => ("#17479E", "#EF1B23"),
+        "PBKS" => ("#DD1F2D", "#DCDDDF"),
+        "GT" => ("#1B2133", "#C9A65B"),
+        "LSG" => ("#A72056", "#0057E2"),
+        _ => ("#455A64", "#CFD8DC")
+    };
+}

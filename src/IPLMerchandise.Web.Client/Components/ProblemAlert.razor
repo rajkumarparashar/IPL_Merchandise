@@ -1,0 +1,69 @@
+@* Renders any API failure the same way. role="alert" makes screen readers announce it immediately. *@
+@if (Problem is not null)
+{
+    <MudAlert Severity="@Severity" Class="my-3" role="alert" aria-live="assertive" data-testid="problem">
+        <MudText Typo="Typo.subtitle2" HtmlTag="strong">@Heading</MudText>
+        <MudText Typo="Typo.body2">@Problem.Message</MudText>
+
+        @if (Problem.Errors.Count > 0)
+        {
+            <ul class="mt-1">
+                @foreach (var (field, messages) in Problem.Errors)
+                {
+                    foreach (var message in messages)
+                    {
+                        <li>@message</li>
+                    }
+                }
+            </ul>
+        }
+
+        @if (Problem.FailingLines.Count > 0)
+        {
+            <ul class="mt-1" data-testid="failing-lines">
+                @foreach (var line in Problem.FailingLines)
+                {
+                    <li>
+                        <strong>@line.ProductName</strong>:
+                        @(line.Available == 0 ? "out of stock" : $"only {line.Available} available, you asked for {line.Requested}")
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (Problem.RetryAfterSeconds is { } wait)
+        {
+            <MudText Typo="Typo.caption">Please wait @wait seconds before trying again.</MudText>
+        }
+
+        @if (OnRetry.HasDelegate && Problem.IsTransient)
+        {
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" Class="mt-2" OnClick="OnRetry" Disabled="RetryDisabled">Retry</MudButton>
+        }
+
+        @if (Problem.CorrelationId is not null)
+        {
+            <MudText Typo="Typo.caption" Class="d-block mt-1">Reference: @Problem.CorrelationId</MudText>
+        }
+    </MudAlert>
+}
+
+@code {
+    [Parameter] public ApiProblem? Problem { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public bool RetryDisabled { get; set; }
+    [Parameter] public string? Title { get; set; }
+
+    private Severity Severity => Problem!.Status is 409 or 412 or 429 ? Severity.Warning : Severity.Error;
+
+    private string Heading => Title ?? Problem!.Status switch
+    {
+        0 => "Connection problem",
+        400 => "Please check your input",
+        404 => "Not found",
+        409 => "We couldn't do that",
+        412 => "This was changed by someone else",
+        429 => "Too many requests",
+        _ => "Something went wrong"
+    };
+}

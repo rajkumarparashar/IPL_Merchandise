@@ -1,0 +1,79 @@
+@* Product cards with "Add to cart". Shared by the home page and the shop so the add-to-cart rules live in one place. *@
+@implements IDisposable
+@inject CartState Cart
+@inject AuthenticationStateProvider Auth
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<div class="product-grid @Class">
+    @foreach (var product in Products)
+    {
+        <ProductCard Product="product" OnAddToCart="AddToCartAsync" Adding="_addingId == product.Id" CanAdd="Cart.RemainingToAdd(product) > 0"
+                     InCart="Cart.QuantityInCart(product.Id)" />
+    }
+</div>
+
+@* Screen readers hear the outcome of "Add to cart"; sighted users also get a snackbar. *@
+<div class="sr-only" role="status" aria-live="polite" data-testid="cart-announcement">@_announcement</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ProductDto> Products { get; set; } = [];
+    [Parameter] public string? Class { get; set; }
+
+    private string? _announcement;
+
+    // Only the card being added shows progress; the other cards stay as they are (no flicker).
+    private string? _addingId;
+
+    // The cart loads and changes independently; re-evaluate which cards can still be added.
+    protected override void OnInitialized() => Cart.Changed += OnCartChanged;
+
+    private async Task AddToCartAsync(ProductDto product)
+    {
+        var user = (await Auth.GetAuthenticationStateAsync()).User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            Nav.NavigateTo($"login?returnUrl={Uri.EscapeDataString($"products/{product.Id}")}");
+            return;
+        }
+        if (_addingId is not null) return; // one add at a time; CartState also guards against double clicks
+        _addingId = product.Id;
+        try
+        {
+            Announce(await Cart.AddAsync(product.Id, product.Name, 1), product);
+        }
+        finally
+        {
+            _addingId = null;
+        }
+    }
+
+    private void Announce(ApiResult<CartDto> result, ProductDto product)
+    {
+        if (result.Problem?.Code == "busy") return; // a previous click is still being saved
+
+        if (result.IsSuccess)
+        {
+            _announcement = $"Added {product.Name} to your cart.";
+            Snackbar.Add(_announcement, Severity.Success, o =>
+            {
+                o.Action = "View cart";
+                o.OnClick = _ => { Nav.NavigateTo("cart"); return Task.CompletedTask; };
+            });
+            return;
+        }
+
+        var problem = result.Problem!;
+        _announcement = problem.Message;
+        Snackbar.Add(problem.Message, Severity.Warning, o =>
+        {
+            // A network failure may or may not have reached the server: retry with the same request id, never a new one.
+            if (!problem.IsTransient) return;
+            o.Action = "Retry";
+            o.OnClick = async _ => Announce(await Cart.RetryAsync(), product);
+        });
+    }
+
+    private void OnCartChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Cart.Changed -= OnCartChanged;
+}

@@ -1,0 +1,112 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject CartState CartState
+@inject SessionEvents Session
+@inject JwtAuthStateProvider AuthProvider
+@inject NavigationManager Nav
+@inject UserTimeZone TimeZone
+
+<MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<div class="app-shell">
+<header class="site-header">
+    <div class="site-header__inner">
+        <a href="/" class="brand" aria-label="IPL Fan Store, home">
+            <MudIcon Icon="@Icons.Material.Filled.SportsCricket" Class="brand__icon" />
+            <span class="brand__ipl">IPL</span>
+            <span class="brand__divider" aria-hidden="true"></span>
+            <span class="brand__store">Fan Store</span>
+        </a>
+
+        <NavMenu />
+
+        <form class="header-search" role="search" @onsubmit="SearchAsync">
+            <MudIcon Icon="@Icons.Material.Filled.Search" Size="Size.Small" />
+            <input type="search" @bind="_headerSearch" placeholder="Search for jerseys, caps, flags..." aria-label="Search products" maxlength="100" />
+        </form>
+
+        <UserMenu OnSignOut="SignOutAsync" />
+
+        <a href="cart" class="header-cart" aria-label="@($"Cart, {CartState.ItemCount} items")">
+            <MudIcon Icon="@Icons.Material.Outlined.ShoppingCart" />
+            @if (CartState.ItemCount > 0)
+            {
+                <span class="header-cart__badge" aria-hidden="true">@CartState.ItemCount</span>
+            }
+        </a>
+    </div>
+</header>
+
+<main id="main" tabindex="-1">
+    <div class="page-container">
+        @if (_sessionExpired)
+        {
+            <MudAlert Severity="Severity.Warning" role="alert" ShowCloseIcon="true" CloseIconClicked="() => _sessionExpired = false" Class="mb-4">
+                Your session has expired. Please sign in again.
+            </MudAlert>
+        }
+        @Body
+    </div>
+</main>
+
+<SiteFooter />
+</div>
+
+@code {
+    private bool _sessionExpired;
+    private string? _headerSearch;
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#0B2A6F",     // navy (buttons, links)
+            Secondary = "#F5B700",   // IPL gold
+            Background = "#F4F6FB",
+            TextPrimary = "#111827",
+            AppbarBackground = "#0A1A4A"
+        },
+        LayoutProperties = new LayoutProperties { DefaultBorderRadius = "6px" }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        CartState.Changed += OnCartChanged;
+        Session.SessionExpired += OnSessionExpired;
+        await TimeZone.LoadAsync();
+        var auth = await AuthProvider.GetAuthenticationStateAsync();
+        if (auth.User.IsInRole("Customer")) await CartState.LoadAsync();
+    }
+
+    private void SearchAsync()
+    {
+        var text = _headerSearch?.Trim();
+        Nav.NavigateTo(string.IsNullOrEmpty(text) ? "shop" : $"shop?search={Uri.EscapeDataString(text)}");
+    }
+
+    private void OnCartChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnSessionExpired() => InvokeAsync(async () =>
+    {
+        _sessionExpired = true;
+        await SignOutAsync();
+    });
+
+    private async Task SignOutAsync()
+    {
+        CartState.Clear();
+        await AuthProvider.SignOutAsync();
+        Nav.NavigateTo("login");
+    }
+
+    public void Dispose()
+    {
+        CartState.Changed -= OnCartChanged;
+        Session.SessionExpired -= OnSessionExpired;
+    }
+}

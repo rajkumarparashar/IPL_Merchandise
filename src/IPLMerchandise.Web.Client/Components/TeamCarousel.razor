@@ -1,0 +1,82 @@
+@* One row of team tiles with previous/next buttons. Scrolls natively (swipe, trackpad, keyboard focus); the buttons scroll by one view. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="team-carousel" role="region" aria-roledescription="carousel" aria-label="Teams">
+    <button type="button" class="team-carousel__nav team-carousel__nav--prev" aria-label="Previous teams" aria-controls="team-track"
+            disabled="@_atStart" @onclick="() => ScrollAsync(-1)">
+        <MudIcon Icon="@Icons.Material.Filled.ChevronLeft" />
+    </button>
+    <div class="team-carousel__track" id="team-track" @ref="_track">
+        @foreach (var team in Teams)
+        {
+            var colours = MerchArt.ColoursFor(team.Code);
+            <a href="@($"shop?franchise={team.Code}")" class="team-tile" data-testid="team-tile"
+               style="@($"background: linear-gradient(135deg, {colours.Primary} 0%, {colours.Primary} 55%, {colours.Secondary} 140%); color: {TextOn(colours.Primary)}; text-shadow: {(IsLight(colours.Primary) ? "none" : "0 1px 3px rgba(0,0,0,.45)")}")">
+                <span class="team-tile__code">@team.Code</span>
+                <span class="team-tile__name">@team.Name</span>
+                <span class="team-tile__count">@(team.Count == 1 ? "1 product" : $"{team.Count} products")</span>
+            </a>
+        }
+    </div>
+    <button type="button" class="team-carousel__nav team-carousel__nav--next" aria-label="Next teams" aria-controls="team-track"
+            disabled="@_atEnd" @onclick="() => ScrollAsync(1)">
+        <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+    </button>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<FranchiseFacet> Teams { get; set; } = [];
+
+    private ElementReference _track;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _watch;
+    private DotNetObjectReference<TeamCarousel>? _self;
+    private bool _atStart = true;
+    private bool _atEnd;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _module = await JS.InvokeAsync<IJSObjectReference?>("import", "./js/carousel.js");
+        if (_module is null) return; // e.g. component tests without a browser
+        _self = DotNetObjectReference.Create(this);
+        _watch = await _module.InvokeAsync<IJSObjectReference?>("watch", _track, _self);
+    }
+
+    private async Task ScrollAsync(int direction)
+    {
+        if (_module is not null) await _module.InvokeVoidAsync("scrollPage", _track, direction);
+    }
+
+    /// <summary>Called from JS whenever the track scrolls or resizes, so the arrows disable at either end.</summary>
+    [JSInvokable]
+    public void OnScrolled(bool atStart, bool atEnd)
+    {
+        if (atStart == _atStart && atEnd == _atEnd) return;
+        (_atStart, _atEnd) = (atStart, atEnd);
+        StateHasChanged();
+    }
+
+    // Readable text on team colours: dark text on light backgrounds (e.g. CSK yellow), white otherwise.
+    private static bool IsLight(string hex)
+    {
+        var r = Convert.ToInt32(hex.Substring(1, 2), 16) / 255.0;
+        var g = Convert.ToInt32(hex.Substring(3, 2), 16) / 255.0;
+        var b = Convert.ToInt32(hex.Substring(5, 2), 16) / 255.0;
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6;
+    }
+
+    private static string TextOn(string hex) => IsLight(hex) ? "#0a1a4a" : "#fff";
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_watch is not null) { await _watch.InvokeVoidAsync("dispose"); await _watch.DisposeAsync(); }
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { }
+        _self?.Dispose();
+    }
+}

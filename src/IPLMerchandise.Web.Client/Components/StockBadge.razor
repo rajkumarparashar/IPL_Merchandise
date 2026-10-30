@@ -1,0 +1,20 @@
+<span class="stock-badge @CssClass" data-testid="stock-status">@Text</span>
+
+@code {
+    [Parameter, EditorRequired] public StockStatus Status { get; set; }
+    [Parameter] public int Quantity { get; set; }
+
+    private string Text => Status switch
+    {
+        StockStatus.OutOfStock => "Out of stock",
+        StockStatus.LowStock => $"Only {Quantity} left",
+        _ => "In stock"
+    };
+
+    private string CssClass => Status switch
+    {
+        StockStatus.OutOfStock => "stock-badge--out",
+        StockStatus.LowStock => "stock-badge--low",
+        _ => "stock-badge--in"
+    };
+}

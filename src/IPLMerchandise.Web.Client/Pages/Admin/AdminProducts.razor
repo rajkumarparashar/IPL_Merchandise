@@ -1,0 +1,81 @@
+@page "/admin/products"
+@attribute [Authorize(Roles = "Admin")]
+@inject ICatalogApi Catalog
+
+<PageTitle>Admin · Products · IPL Fan Store</PageTitle>
+
+<section class="page-banner" aria-labelledby="admin-title">
+    <div class="page-banner__inner page-banner__inner--actions">
+        <div>
+            <h1 id="admin-title">Manage products</h1>
+            <p>Prices, stock, availability and featured products</p>
+        </div>
+        <MudButton Href="admin/products/new" Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Add" Class="page-banner__action">New product</MudButton>
+    </div>
+</section>
+
+<EditForm Model="this" OnSubmit="SearchAsync" class="panel orders-filters admin-filters" role="search" aria-label="Search products">
+    <MudTextField @bind-Value="_search" Placeholder="Search by name..." Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" UserAttributes="@(new() { ["aria-label"] = "Search products by name" })" />
+    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Class="orders-filters__button">Search</MudButton>
+</EditForm>
+
+<LoadState Loading="_loading && _items.Count == 0" Problem="_problem" OnRetry="SearchAsync">
+    <div class="panel admin-table">
+    <table class="cart-table">
+        <caption class="sr-only">All products including disabled ones</caption>
+        <thead><tr><th scope="col">Name</th><th scope="col">Franchise</th><th scope="col">Type</th><th scope="col">Price</th><th scope="col">Stock</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+        <tbody>
+            @foreach (var p in _items)
+            {
+                <tr data-testid="admin-product-row">
+                    <td><a href="@($"admin/products/{p.Id}")" class="cart-product__name">@p.Name</a>@if (p.IsFeatured == true) { <span class="admin-tag">Featured</span> }</td>
+                    <td>@p.FranchiseCode</td>
+                    <td>@ProductCard.TypeName(p.Type)</td>
+                    <td><Rupees Amount="p.Price" /></td>
+                    <td>@p.StockQuantity</td>
+                    <td><span class="status-chip @(p.IsActive ? "status-chip--confirmed" : "status-chip--disabled")">@(p.IsActive ? "Active" : "Disabled")</span></td>
+                    <td>
+                        <MudButton Href="@($"admin/products/{p.Id}")" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" aria-label="@($"Edit {p.Name}")">Edit</MudButton>
+                        <MudButton Href="@($"admin/products/{p.Id}/audit")" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary" aria-label="@($"Audit history for {p.Name}")">History</MudButton>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    </div>
+    @if (_token is not null)
+    {
+        <MudButton Variant="Variant.Outlined" Class="mt-3" OnClick="LoadMoreAsync" Disabled="_loading">Load more</MudButton>
+    }
+</LoadState>
+
+@code {
+    private readonly List<ProductDto> _items = [];
+    private string? _search;
+    private string? _token;
+    private ApiProblem? _problem;
+    private bool _loading;
+
+    protected override Task OnInitializedAsync() => SearchAsync();
+
+    private async Task SearchAsync()
+    {
+        _items.Clear();
+        _token = null;
+        await LoadAsync(null);
+    }
+
+    private Task LoadMoreAsync() => LoadAsync(_token);
+
+    private async Task LoadAsync(string? token)
+    {
+        _loading = true;
+        _problem = null;
+        var result = await Catalog.SearchAsync(new ProductQuery(_search, PageSize: ApiLimits.MaxPageSize, IncludeInactive: true), token);
+        _loading = false;
+        if (!result.IsSuccess) { _problem = result.Problem; return; }
+        _items.AddRange(result.Value!.Items);
+        _token = result.Value.ContinuationToken;
+    }
+}

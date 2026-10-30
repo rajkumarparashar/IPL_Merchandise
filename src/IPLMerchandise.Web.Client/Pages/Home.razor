@@ -1,0 +1,87 @@
+@page "/"
+@inject ICatalogApi Catalog
+
+<PageTitle>IPL Fan Store</PageTitle>
+
+<HeroBanner />
+
+<section class="home-section" aria-labelledby="categories-title">
+    <div class="home-section__head">
+        <h2 id="categories-title">Shop by category</h2>
+        <a href="shop" class="link-button">View all products <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" /></a>
+    </div>
+    <div class="category-grid">
+        @foreach (var (type, label) in Categories)
+        {
+            <a href="@($"shop?type={type}")" class="category-tile" data-testid="category-tile">
+                <span class="category-tile__art"><MerchArt Type="type" Primary="#1b3fa0" Secondary="#f2c14e" Label="FAN" /></span>
+                <span class="category-tile__name">@label</span>
+                <span class="category-tile__count">@CountLabel(TypeCount(type))</span>
+            </a>
+        }
+    </div>
+</section>
+
+@if (Teams.Any())
+{
+    <section class="home-section" aria-labelledby="teams-title">
+        <div class="home-section__head">
+            <h2 id="teams-title">Shop by team</h2>
+        </div>
+        <TeamCarousel Teams="Teams.ToList()" />
+    </section>
+}
+
+<section class="home-section" aria-labelledby="featured-title">
+    <div class="home-section__head">
+        <h2 id="featured-title">Featured products</h2>
+        <a href="shop" class="link-button">View all products <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" /></a>
+    </div>
+    <LoadState Loading="_loading" Problem="_problem" OnRetry="LoadAsync" LoadingText="Loading products…">
+        @if (_featured.Count > 0)
+        {
+            <ProductGrid Products="_featured" Class="product-grid--featured" />
+        }
+    </LoadState>
+</section>
+
+<ul class="panel home-benefits">
+    <li><MudIcon Icon="@Icons.Material.Outlined.VerifiedUser" /> <span><strong>Official merchandise</strong> for all ten franchises</span></li>
+    <li><MudIcon Icon="@Icons.Material.Outlined.LocalShipping" /> <span><strong>Free delivery</strong> on orders of ₹999.00 or more</span></li>
+    <li><MudIcon Icon="@Icons.Material.Outlined.Payments" /> <span><strong>Pay on delivery</strong>, prices include taxes</span></li>
+</ul>
+
+@code {
+    private const int FeaturedCount = 12;
+
+    private static readonly (ProductType Type, string Label)[] Categories =
+    [
+        (ProductType.Jersey, "Jerseys"), (ProductType.Cap, "Caps"), (ProductType.Flag, "Flags"), (ProductType.SignedPhotograph, "Signed photographs")
+    ];
+
+    private ProductFacetsDto? _facets;
+    private IReadOnlyList<ProductDto> _featured = [];
+    private ApiProblem? _problem;
+    private bool _loading = true;
+
+    // Only teams that actually have products, most products first.
+    private IEnumerable<FranchiseFacet> Teams => (_facets?.Franchises ?? []).Where(f => f.Count > 0).OrderByDescending(f => f.Count).ThenBy(f => f.Name);
+
+    private int TypeCount(ProductType type) => _facets?.Types.FirstOrDefault(t => t.Type == type)?.Count ?? 0;
+
+    private static string CountLabel(int count) => count == 1 ? "1 product" : $"{count} products";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _problem = null;
+        var facets = Catalog.GetFacetsAsync(null);
+        var products = await Catalog.SearchAsync(new ProductQuery(PageSize: FeaturedCount, FeaturedOnly: true), null);
+        _facets = (await facets).Value;
+        _featured = products.Value?.Items ?? [];
+        _problem = products.Problem;
+        _loading = false;
+    }
+}

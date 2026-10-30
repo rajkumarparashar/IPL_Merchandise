@@ -1,0 +1,60 @@
+# One command: `docker compose up --build`, then open http://localhost:5300
+# Development only: the defaults below are dev-only values. Production configuration is described in README → Deployment.
+name: ipl-merchandise
+
+services:
+  cosmos:
+    # Linux "vNext" emulator: runs on x64 and Apple Silicon. Data is in-memory (not persisted across restarts).
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+    command: ["--protocol", "http"]
+    ports:
+      - "8081:8081"   # Cosmos endpoint
+      - "1234:1234"   # Data Explorer UI
+
+  azurite:
+    # Azure Storage emulator: product photos (Blob service only). Data lives in the container and is lost when it is removed.
+    image: mcr.microsoft.com/azure-storage/azurite:3.37.0
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--skipApiVersionCheck"]
+    ports:
+      - "10000:10000" # browsers load photos from here
+
+  api:
+    build:
+      context: .
+      dockerfile: src/IPLMerchandise.API/Dockerfile
+    depends_on:
+      - cosmos
+      - azurite
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # Well-known public emulator key, not a secret. Real accounts use a secret store (README → Secrets).
+      Cosmos__ConnectionString: "AccountEndpoint=http://cosmos:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==;"
+      Cosmos__UseGatewayMode: "true"
+      Cosmos__InitializeOnStartup: "true"
+      Cosmos__SeedOnStartup: "true"
+      # Azurite's well-known development account (public, not a secret). The API reaches it as "azurite";
+      # browsers reach the same files through localhost, so image URLs use PublicBaseUrl.
+      ImageStorage__ConnectionString: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      ImageStorage__PublicBaseUrl: http://localhost:10000/devstoreaccount1/product-images
+      ImageStorage__CreateContainerIfMissing: "true"
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:-local-dev-only-signing-key-change-me-0123456789}
+      AdminSeed__Email: ${ADMIN_EMAIL:-admin@iplstore.local}
+      AdminSeed__Password: ${ADMIN_PASSWORD:-Admin@12345}
+      Cors__AllowedOrigins__0: http://localhost:5300
+      Api__EnableSwagger: "true"
+      Logging__Console__FormatterName: json
+    ports:
+      - "5200:8080"
+
+  web:
+    build:
+      context: .
+      dockerfile: src/IPLMerchandise.Web/Dockerfile
+    depends_on:
+      - api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # The browser calls the API directly, so this is the address as seen from the user's machine.
+      Client__ApiBaseUrl: http://localhost:5200/
+    ports:
+      - "5300:8080"

@@ -1,0 +1,128 @@
+@* Admin photo field. Shows what shoppers will see and lets the admin choose a new photo or remove the current one.
+   Nothing is uploaded here: the page sends the photo when the admin clicks Save. *@
+<div class="image-picker" data-testid="image-picker">
+    <div class="image-picker__preview" style="@Backdrop">
+        @if (Selected is not null)
+        {
+            <img src="@Selected.PreviewDataUrl" alt="Preview of the selected photo" class="product-photo" data-testid="image-preview" />
+        }
+        else
+        {
+            <ProductPhoto ImageUrl="@(Remove ? null : CurrentUrl)" Type="Type" FranchiseCode="@FranchiseCode" Eager="true" />
+        }
+    </div>
+
+    <div class="image-picker__body">
+        <div class="image-picker__actions">
+            @* Real file input (keyboard and screen-reader friendly), visually replaced by the label styled as a button. *@
+            <InputFile @key="_inputVersion" id="@InputId" OnChange="OnChosenAsync" accept="@string.Join(",", ApiLimits.ImageContentTypes)"
+                       class="image-picker__input" data-testid="image-input" disabled="@Disabled" />
+            <label for="@InputId" class="image-picker__choose">
+                <MudIcon Icon="@Icons.Material.Outlined.FileUpload" Size="Size.Small" />
+                @(HasPhoto ? "Replace photo" : "Choose photo")
+            </label>
+            @if (Selected is not null)
+            {
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="UndoSelectionAsync" Disabled="Disabled" data-testid="image-undo">Undo</MudButton>
+            }
+            else if (CurrentUrl is not null && !Remove)
+            {
+                <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Outlined.Delete"
+                           OnClick="() => SetRemoveAsync(true)" Disabled="Disabled" data-testid="image-remove">Remove photo</MudButton>
+            }
+            else if (Remove)
+            {
+                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => SetRemoveAsync(false)" Disabled="Disabled" data-testid="image-keep">Keep photo</MudButton>
+            }
+        </div>
+
+        <p class="image-picker__status" role="status" aria-live="polite">
+            @if (_error is not null)
+            {
+                <span class="image-picker__error" data-testid="image-error">@_error</span>
+            }
+            else if (Selected is not null)
+            {
+                <span>New photo: <strong>@Selected.FileName</strong> (@FormatSize(Selected.Content.Length)). It is uploaded when you save.</span>
+            }
+            else if (Remove)
+            {
+                <span>The photo will be removed when you save. Shoppers will see the illustration instead.</span>
+            }
+            else if (CurrentUrl is null)
+            {
+                <span>No photo yet: shoppers see the illustration shown here.</span>
+            }
+        </p>
+        <p class="image-picker__help">JPEG, PNG or WebP, up to @FormatSize(ApiLimits.MaxImageBytes). Only use photos the store has the rights to.</p>
+    </div>
+</div>
+
+@code {
+    /// <summary>The photo the product has now (null when it has none).</summary>
+    [Parameter] public string? CurrentUrl { get; set; }
+    [Parameter] public ProductType Type { get; set; } = ProductType.Other;
+    [Parameter] public string FranchiseCode { get; set; } = "";
+    [Parameter] public bool Disabled { get; set; }
+
+    [Parameter] public ImageUpload? Selected { get; set; }
+    [Parameter] public EventCallback<ImageUpload?> SelectedChanged { get; set; }
+
+    /// <summary>True when the admin asked to remove the current photo.</summary>
+    [Parameter] public bool Remove { get; set; }
+    [Parameter] public EventCallback<bool> RemoveChanged { get; set; }
+
+    private const string InputId = "product-image";
+    private string? _error;
+    private int _inputVersion; // re-creates the file input, so the same file can be chosen again after Undo
+
+    private bool HasPhoto => Selected is not null || (CurrentUrl is not null && !Remove);
+
+    private string Backdrop
+    {
+        get
+        {
+            var (primary, _) = MerchArt.ColoursFor(FranchiseCode);
+            return $"background: radial-gradient(circle at 50% 45%, {primary}66 0%, transparent 62%), linear-gradient(160deg, #13245a, #0a1636)";
+        }
+    }
+
+    private async Task OnChosenAsync(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        var file = e.File;
+        // Quick checks for instant feedback. The API checks again, including the file's actual content.
+        if (!ApiLimits.ImageContentTypes.Contains(file.ContentType))
+        {
+            _error = "Choose a JPEG, PNG or WebP image.";
+            return;
+        }
+        if (file.Size == 0 || file.Size > ApiLimits.MaxImageBytes)
+        {
+            _error = file.Size == 0 ? "That file is empty." : $"That file is {FormatSize(file.Size)}. The limit is {FormatSize(ApiLimits.MaxImageBytes)}.";
+            return;
+        }
+
+        using var buffer = new MemoryStream((int)file.Size);
+        await using (var stream = file.OpenReadStream(ApiLimits.MaxImageBytes))
+            await stream.CopyToAsync(buffer);
+        await SelectedChanged.InvokeAsync(new ImageUpload(buffer.ToArray(), file.Name, file.ContentType));
+        if (Remove) await RemoveChanged.InvokeAsync(false);
+    }
+
+    private async Task UndoSelectionAsync()
+    {
+        _error = null;
+        _inputVersion++;
+        await SelectedChanged.InvokeAsync(null);
+    }
+
+    private async Task SetRemoveAsync(bool remove)
+    {
+        _error = null;
+        await RemoveChanged.InvokeAsync(remove);
+    }
+
+    internal static string FormatSize(long bytes) =>
+        bytes >= 1024 * 1024 ? $"{bytes / (1024d * 1024):0.#} MB" : $"{Math.Max(1, bytes / 1024)} KB";
+}

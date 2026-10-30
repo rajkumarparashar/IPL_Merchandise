@@ -1,0 +1,229 @@
+@page "/cart"
+@attribute [Authorize(Roles = "Customer")]
+@implements IDisposable
+@inject CartState CartState
+
+<PageTitle>Your cart · IPL Fan Store</PageTitle>
+
+<section class="page-banner" aria-labelledby="cart-title">
+    <div class="page-banner__inner">
+        <h1 id="cart-title">Your Cart</h1>
+        <p>Review your items and proceed to checkout</p>
+    </div>
+</section>
+
+<CartLiveUpdates />
+
+<LoadState Loading="_loading" Problem="_loadProblem" OnRetry="LoadAsync" LoadingText="Loading your cart…">
+    @if (Cart is { Lines.Count: 0 })
+    {
+        <div class="panel cart-empty">
+            <MudIcon Icon="@Icons.Material.Outlined.ShoppingCart" Size="Size.Large" />
+            <p>Your cart is empty.</p>
+            <MudButton Href="shop" Variant="Variant.Filled" Color="Color.Primary">Browse the store</MudButton>
+        </div>
+    }
+    else if (Cart is not null)
+    {
+        <div class="cart-layout">
+            <div class="panel cart-items">
+                @if (Cart.RequiresReview)
+                {
+                    <div class="review-banner" role="alert" data-testid="review-banner">
+                        <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Size="Size.Small" />
+                        <div>
+                            <strong>Some items in your cart have changed since you added them.</strong>
+                            Your total will change from <Rupees Amount="Cart.Total" /> to <strong><Rupees Amount="Cart.TotalAfterAccept" /></strong>.
+                            Review the highlighted items, then accept the new total to continue.
+                        </div>
+                        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="AcceptAsync" Disabled="CartState.IsBusy" data-testid="accept-changes">
+                            Accept new total
+                        </MudButton>
+                    </div>
+                }
+
+                <table class="cart-table">
+                    <caption class="sr-only">Items in your cart</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Product</th>
+                            <th scope="col">Price</th>
+                            <th scope="col">Quantity</th>
+                            <th scope="col">Total</th>
+                            <th scope="col"><span class="sr-only">Remove</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var line in Cart.Lines)
+                        {
+                            var colours = MerchArt.ColoursFor(line.FranchiseCode);
+                            var canEdit = !line.Issues.Contains(CartLineIssue.Unavailable) && !line.Issues.Contains(CartLineIssue.OutOfStock);
+                            <tr data-testid="cart-line" class="@(line.Issues.Count > 0 ? "is-flagged" : "")">
+                                <td>
+                                    <div class="cart-product">
+                                        <a href="@($"products/{line.ProductId}")" class="cart-product__thumb" tabindex="-1" aria-hidden="true"
+                                           style="@($"background: radial-gradient(circle at 50% 45%, {colours.Primary}66 0%, transparent 65%), linear-gradient(160deg, #13245a, #0a1636)")">
+                                            <ProductPhoto ImageUrl="@line.ImageUrl" Type="@(line.Type ?? ProductType.Other)" FranchiseCode="@line.FranchiseCode" />
+                                        </a>
+                                        <div>
+                                            <a href="@($"products/{line.ProductId}")" class="cart-product__name">@line.ProductName</a>
+                                            <div class="cart-product__meta">
+                                                @(line.FranchiseName ?? line.FranchiseCode)@(line.Type is { } t ? $" · {ProductCard.TypeName(t)}" : "")
+                                            </div>
+                                            <StockBadge Status="LineStatus(line)" Quantity="line.AvailableStock" />
+                                            @if (canEdit && line.Quantity >= line.MaxQuantity && line.MaxQuantity < line.AvailableStock)
+                                            {
+                                                @* "+" is disabled by the per-order limit, not by stock: say why. *@
+                                                <div class="cart-product__limit" data-testid="line-limit">Limit @line.MaxQuantity per order</div>
+                                            }
+                                            @foreach (var issue in line.Issues)
+                                            {
+                                                <div class="cart-product__issue" data-testid="line-issue">@Describe(issue, line)</div>
+                                            }
+                                        </div>
+                                    </div>
+                                </td>
+                                <td data-label="Price"><Rupees Amount="line.UnitPrice" /></td>
+                                <td data-label="Quantity">
+                                    @if (canEdit)
+                                    {
+                                        <div class="qty-stepper qty-stepper--small">
+                                            <button type="button" aria-label="@($"Decrease quantity of {line.ProductName}")"
+                                                    disabled="@(CartState.IsBusy || line.Quantity <= 1)" @onclick="() => UpdateAsync(line, line.Quantity - 1)">
+                                                <MudIcon Icon="@Icons.Material.Filled.Remove" Size="Size.Small" />
+                                            </button>
+                                            <span class="qty-stepper__value" aria-label="@($"Quantity of {line.ProductName}")">@line.Quantity</span>
+                                            <button type="button" aria-label="@($"Increase quantity of {line.ProductName}")"
+                                                    disabled="@(CartState.IsBusy || line.Quantity >= line.MaxQuantity)" @onclick="() => UpdateAsync(line, line.Quantity + 1)">
+                                                <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" />
+                                            </button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span>@line.Quantity</span>
+                                    }
+                                </td>
+                                <td data-label="Total" class="cart-table__total"><Rupees Amount="line.LineTotal" /></td>
+                                <td>
+                                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" aria-label="@($"Remove {line.ProductName}")"
+                                                   OnClick="() => RemoveAsync(line.ProductId)" Disabled="CartState.IsBusy" Size="Size.Small" />
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
+                <ProblemAlert Problem="CartState.LastProblem" OnRetry="RetryAsync" RetryDisabled="CartState.IsBusy" />
+
+                <div class="cart-notice" role="note">
+                    <MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small" />
+                    <span>Price and stock changes are shown here as soon as they happen.</span>
+                    <button type="button" class="link-button" @onclick="LoadAsync" disabled="@CartState.IsBusy">
+                        <MudIcon Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" /> Refresh Cart
+                    </button>
+                </div>
+
+                <div class="cart-footer">
+                    <a href="shop" class="cart-footer__continue"><MudIcon Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" /> Continue Shopping</a>
+                    <div class="cart-footer__clear">
+                        @if (_confirmClear)
+                        {
+                            <span role="status">Remove all items from your cart?</span>
+                            <MudButton Variant="Variant.Filled" Color="Color.Error" Size="Size.Small" OnClick="ClearAsync" Disabled="CartState.IsBusy" data-testid="confirm-clear">Yes, clear cart</MudButton>
+                            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => _confirmClear = false">Cancel</MudButton>
+                        }
+                        else
+                        {
+                            <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small" StartIcon="@Icons.Material.Outlined.RemoveShoppingCart"
+                                       OnClick="() => _confirmClear = true" Disabled="CartState.IsBusy" data-testid="clear-cart">Clear cart</MudButton>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <aside class="panel order-summary" aria-labelledby="summary-title">
+                <h2 id="summary-title">Order Summary</h2>
+                <dl>
+                    <dt>Subtotal (@Cart.ItemCount @(Cart.ItemCount == 1 ? "item" : "items"))</dt><dd><Rupees Amount="Cart.Subtotal" /></dd>
+                    <dt>Taxes</dt><dd>Included in prices</dd>
+                    <dt>Shipping</dt>
+                    <dd class="@(Cart.ShippingFee == 0 ? "is-free" : "")">@(Cart.ShippingFee == 0 ? "FREE" : Money.Format(Cart.ShippingFee))</dd>
+                </dl>
+                <div class="order-summary__total">
+                    <span>Total</span><span data-testid="cart-total"><Rupees Amount="Cart.Total" /></span>
+                </div>
+                <MudButton Href="checkout" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Large"
+                           EndIcon="@Icons.Material.Filled.ArrowForward" Disabled="Cart.RequiresReview || CartState.IsBusy"
+                           Class="order-summary__checkout" data-testid="go-to-checkout">
+                    Proceed to checkout
+                </MudButton>
+                @if (Cart.RequiresReview)
+                {
+                    <p class="order-summary__hint">Accept the changes in your cart before checking out.</p>
+                }
+                <ul class="order-summary__badges">
+                    <li><MudIcon Icon="@Icons.Material.Outlined.Lock" Size="Size.Small" /> Secure Checkout</li>
+                    <li><MudIcon Icon="@Icons.Material.Outlined.LocalShipping" Size="Size.Small" /> Free delivery over ₹999.00</li>
+                    <li><MudIcon Icon="@Icons.Material.Outlined.VerifiedUser" Size="Size.Small" /> Official Merchandise</li>
+                </ul>
+            </aside>
+        </div>
+    }
+</LoadState>
+
+@code {
+    private bool _loading = true;
+    private ApiProblem? _loadProblem;
+
+    // Two-step: "Clear cart" asks for confirmation so one stray click cannot empty the cart.
+    private bool _confirmClear;
+
+    private CartDto? Cart => CartState.Cart;
+
+    protected override async Task OnInitializedAsync()
+    {
+        CartState.Changed += OnChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = Cart is null; // "Refresh Cart" keeps the table on screen while it reloads
+        var result = await CartState.LoadAsync();
+        _loadProblem = result.Problem;
+        _loading = false;
+    }
+
+    // Each click is its own cart change with its own idempotency key; while one is saving the steppers are disabled.
+    private Task UpdateAsync(CartLineDto line, int quantity) =>
+        quantity < 1 || quantity > line.MaxQuantity ? Task.CompletedTask : CartState.UpdateQuantityAsync(line.ProductId, quantity);
+
+    private Task RemoveAsync(string productId) => CartState.RemoveAsync(productId);
+
+    private async Task ClearAsync()
+    {
+        var result = await CartState.EmptyCartAsync();
+        if (result.IsSuccess) _confirmClear = false;
+    }
+
+    private Task AcceptAsync() => CartState.AcceptChangesAsync();
+    private Task RetryAsync() => CartState.RetryAsync();
+
+    private static StockStatus LineStatus(CartLineDto line) =>
+        line.Issues.Contains(CartLineIssue.OutOfStock) || line.Issues.Contains(CartLineIssue.Unavailable) ? StockStatus.OutOfStock
+        : line.AvailableStock <= 5 ? StockStatus.LowStock
+        : StockStatus.InStock;
+
+    internal static string Describe(CartLineIssue issue, CartLineDto line) => issue switch
+    {
+        CartLineIssue.PriceChanged => $"Price changed from {Money.Format(line.UnitPrice)} to {Money.Format(line.CurrentUnitPrice ?? 0)}",
+        CartLineIssue.InsufficientStock => $"Only {line.AvailableStock} left in stock",
+        CartLineIssue.OutOfStock => "Now out of stock: will be removed when you accept",
+        CartLineIssue.Unavailable => "No longer available: will be removed when you accept",
+        _ => issue.ToString()
+    };
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => CartState.Changed -= OnChanged;
+}

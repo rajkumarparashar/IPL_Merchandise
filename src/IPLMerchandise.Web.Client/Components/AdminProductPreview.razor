@@ -1,0 +1,31 @@
+@* Side panel on admin product pages: how the product currently looks to shoppers, plus quick links. *@
+<aside class="panel order-summary admin-preview" aria-labelledby="preview-title">
+    <h2 id="preview-title">Current product</h2>
+    <div class="admin-preview__art" style="@(Product.ImageUrl is not null ? ProductCard.PhotoBackdrop : $"background: radial-gradient(circle at 50% 45%, {_colours.Primary}66 0%, transparent 62%), linear-gradient(160deg, #13245a, #0a1636)")">
+        <ProductPhoto ImageUrl="@Product.ImageUrl" Type="Product.Type" FranchiseCode="@Product.FranchiseCode" />
+    </div>
+    <p class="admin-preview__name">@Product.Name</p>
+    <p class="cart-product__meta">@Product.FranchiseName · @ProductCard.TypeName(Product.Type)</p>
+    <dl>
+        <dt>Price</dt><dd><Rupees Amount="Product.Price" /></dd>
+        <dt>Stock</dt><dd><StockBadge Status="Product.StockStatus" Quantity="Product.StockQuantity" /> @Product.StockQuantity units</dd>
+        <dt>Status</dt><dd>@(Product.IsActive ? "Available for sale" : "Disabled")</dd>
+        <dt>Home page</dt><dd>@(Product.IsFeatured == true ? "Featured" : "Not featured")</dd>
+        <dt>Photo</dt><dd>@(Product.ImageUrl is null ? "None (illustration shown)" : "Uploaded")</dd>
+    </dl>
+    <ul class="order-summary__badges">
+        <li><MudIcon Icon="@Icons.Material.Outlined.History" Size="Size.Small" /> <a href="@($"admin/products/{Product.Id}/audit")">Price and stock history</a></li>
+        @if (Product.IsActive)
+        {
+            <li><MudIcon Icon="@Icons.Material.Outlined.Storefront" Size="Size.Small" /> <a href="@($"products/{Product.Id}")">View in store</a></li>
+        }
+    </ul>
+</aside>
+
+@code {
+    [Parameter, EditorRequired] public ProductDto Product { get; set; } = default!;
+
+    private (string Primary, string Secondary) _colours;
+
+    protected override void OnParametersSet() => _colours = MerchArt.ColoursFor(Product.FranchiseCode);
+}

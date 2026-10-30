@@ -1,0 +1,29 @@
+@* The product's photo when it has one, otherwise the drawn illustration. Falls back to the illustration if the photo fails to load. *@
+@if (ShowPhoto)
+{
+    <img src="@ImageUrl" alt="@Alt" class="product-photo" loading="@(Eager ? "eager" : "lazy")" decoding="async"
+         @onerror="() => _failedUrl = ImageUrl" data-testid="product-photo" />
+}
+else
+{
+    <MerchArt Type="Type" Primary="@_colours.Primary" Secondary="@_colours.Secondary" Label="@FranchiseCode" />
+}
+
+@code {
+    [Parameter] public string? ImageUrl { get; set; }
+    [Parameter] public ProductType Type { get; set; } = ProductType.Other;
+    [Parameter] public string FranchiseCode { get; set; } = "";
+
+    /// <summary>Empty by default: most pictures sit next to the product name, so describing them again is noise for screen readers.</summary>
+    [Parameter] public string Alt { get; set; } = "";
+
+    /// <summary>Load straight away (the main picture on the details page) instead of when scrolled into view.</summary>
+    [Parameter] public bool Eager { get; set; }
+
+    private (string Primary, string Secondary) _colours;
+    private string? _failedUrl; // remembered per URL, so a replaced photo gets a fresh try
+
+    private bool ShowPhoto => !string.IsNullOrWhiteSpace(ImageUrl) && ImageUrl != _failedUrl;
+
+    protected override void OnParametersSet() => _colours = MerchArt.ColoursFor(FranchiseCode);
+}

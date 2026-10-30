@@ -1,0 +1,270 @@
+@page "/products/{Id}"
+@implements IDisposable
+@inject ICatalogApi Catalog
+@inject CartState Cart
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider Auth
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<PageTitle>@(_product?.Name ?? "Product") · IPL Fan Store</PageTitle>
+
+<div class="stadium-strip" aria-hidden="true"></div>
+
+<nav aria-label="Breadcrumb" class="breadcrumb">
+    <ol>
+        <li><a href="/"><MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" /> Home</a></li>
+        <li><a href="shop">Shop</a></li>
+        <li aria-current="page">@(_product?.Name ?? "Product")</li>
+    </ol>
+</nav>
+
+<LoadState Loading="_loading" Problem="_loadProblem" OnRetry="LoadAsync">
+    @if (_product is not null)
+    {
+        <div class="pdp">
+            @* ---------- Gallery ---------- *@
+            <div class="pdp__gallery">
+                <div class="pdp__thumbs">
+                    @for (var i = 0; i < Views.Length; i++)
+                    {
+                        var index = i;
+                        <button type="button" class="pdp__thumb @(index == _view ? "is-active" : "")" style="@Backdrop(Views[index].Studio)"
+                                aria-label="@($"Show {Views[index].Name.ToLowerInvariant()}")" aria-pressed="@(index == _view ? "true" : "false")"
+                                @onclick="() => _view = index">
+                            <div class="merch-view @Views[index].Css">
+                                <ProductPhoto ImageUrl="@_product.ImageUrl" Type="_product.Type" FranchiseCode="@_product.FranchiseCode" />
+                            </div>
+                        </button>
+                    }
+                </div>
+
+                <div class="pdp__image @(_zoomed ? "is-zoomed" : "")" style="@Backdrop(Views[_view].Studio)"
+                     role="img" aria-label="@($"{_product.Name}, {Views[_view].Name.ToLowerInvariant()}{(_product.ImageUrl is null ? " (illustration)" : "")}")">
+                    <div class="merch-view @Views[_view].Css">
+                        <ProductPhoto ImageUrl="@_product.ImageUrl" Type="_product.Type" FranchiseCode="@_product.FranchiseCode" Eager="true" />
+                    </div>
+                    @if (_product.IsLimitedEdition)
+                    {
+                        <span class="pdp__badge">Limited Edition</span>
+                    }
+                    <button type="button" class="pdp__nav pdp__nav--prev" aria-label="Previous image" @onclick="() => Step(-1)">
+                        <MudIcon Icon="@Icons.Material.Filled.ChevronLeft" />
+                    </button>
+                    <button type="button" class="pdp__nav pdp__nav--next" aria-label="Next image" @onclick="() => Step(1)">
+                        <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                    </button>
+                    <button type="button" class="pdp__zoom" aria-label="@(_zoomed ? "Zoom out" : "Zoom in")" aria-pressed="@(_zoomed ? "true" : "false")"
+                            @onclick="() => _zoomed = !_zoomed">
+                        <MudIcon Icon="@(_zoomed ? Icons.Material.Filled.ZoomOut : Icons.Material.Filled.ZoomIn)" Size="Size.Small" />
+                    </button>
+                </div>
+            </div>
+
+            @* ---------- Details ---------- *@
+            <div class="pdp__info">
+                <div class="pdp__top">
+                    <span class="pdp__pill">@_product.FranchiseName</span>
+                    <button type="button" class="pdp__share" aria-label="Copy link to this product" @onclick="ShareAsync">
+                        <MudIcon Icon="@Icons.Material.Filled.Share" Size="Size.Small" />
+                    </button>
+                </div>
+                <h1 class="pdp__title">@_product.Name</h1>
+                <p class="pdp__meta">@_product.FranchiseName · @ProductCard.TypeName(_product.Type)</p>
+
+                <p class="pdp__price" data-testid="price"><Rupees Amount="_product.Price" /> <span class="pdp__tax">(Incl. of all taxes)</span></p>
+
+                <p class="pdp__availability pdp__availability--@_product.StockStatus.ToString().ToLowerInvariant()">
+                    <MudIcon Icon="@(_product.StockStatus == StockStatus.OutOfStock ? Icons.Material.Filled.Cancel : Icons.Material.Filled.CheckCircle)" Size="Size.Small" />
+                    @switch (_product.StockStatus)
+                    {
+                        case StockStatus.OutOfStock: <span>Out of stock</span> break;
+                        case StockStatus.LowStock: <span>Only @_product.StockQuantity left</span> break;
+                        default: <span>In stock</span><span class="pdp__available">· @Available available</span> break;
+                    }
+                </p>
+
+                @if (_product.StockStatus == StockStatus.OutOfStock)
+                {
+                    <MudAlert Severity="Severity.Info" Class="mt-3" role="status">This item is currently out of stock.</MudAlert>
+                }
+                else if (MaxQuantity == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Class="mt-3" role="status" data-testid="limit-reached">
+                        @LimitReachedText <MudLink Href="cart">View cart</MudLink>
+                    </MudAlert>
+                }
+                else
+                {
+                    <EditForm Model="this" OnSubmit="AddToCartAsync" class="pdp__buy">
+                        <label for="quantity" class="pdp__label">Quantity</label>
+                        <div class="qty-stepper">
+                            <button type="button" aria-label="Decrease quantity" @onclick="() => SetQuantity(_quantity - 1)" disabled="@(_quantity <= 1)">
+                                <MudIcon Icon="@Icons.Material.Filled.Remove" Size="Size.Small" />
+                            </button>
+                            <input id="quantity" type="number" inputmode="numeric" min="1" max="@MaxQuantity"
+                                   value="@_quantity" @onchange="e => SetQuantity(int.TryParse(e.Value?.ToString(), out var q) ? q : 1)"
+                                   aria-describedby="quantity-help" />
+                            <button type="button" aria-label="Increase quantity" @onclick="() => SetQuantity(_quantity + 1)" disabled="@(_quantity >= MaxQuantity)">
+                                <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" />
+                            </button>
+                        </div>
+                        <span id="quantity-help" class="pdp__help" data-testid="quantity-help">@QuantityHelp</span>
+                        <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Large"
+                                   StartIcon="@Icons.Material.Outlined.ShoppingCart" Disabled="Cart.IsBusy" Class="pdp__add" data-testid="add-to-cart">
+                            Add to cart
+                        </MudButton>
+                    </EditForm>
+                }
+
+                <ProblemAlert Problem="_addProblem" OnRetry="RetryAsync" RetryDisabled="Cart.IsBusy" />
+                @if (_added)
+                {
+                    <MudAlert Severity="Severity.Success" Class="mt-3" role="status">
+                        Added to your cart. <MudLink Href="cart">View cart</MudLink>
+                    </MudAlert>
+                }
+
+                <ul class="trust-badges">
+                    <li><MudIcon Icon="@Icons.Material.Outlined.VerifiedUser" Size="Size.Small" /> Official Merchandise</li>
+                    <li><MudIcon Icon="@Icons.Material.Outlined.LocalShipping" Size="Size.Small" /> Free delivery over ₹999.00</li>
+                    <li><MudIcon Icon="@Icons.Material.Outlined.Lock" Size="Size.Small" /> Secure Checkout</li>
+                </ul>
+
+                <section class="pdp__description" aria-labelledby="description-title">
+                    <h2 id="description-title">Product Description</h2>
+                    <p>@_product.Description</p>
+                    <ul>
+                        @foreach (var point in Highlights)
+                        {
+                            <li>@point</li>
+                        }
+                    </ul>
+                </section>
+            </div>
+        </div>
+    }
+</LoadState>
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    // Views of the product picture: its photo if it has one, otherwise the illustration (see DESIGN.md).
+    private static readonly (string Name, string Css, bool Studio)[] Views =
+    [
+        ("Front view", "", false),
+        ("Close-up", "merch-view--closeup", false),
+        ("Studio view", "", true)
+    ];
+
+    private ProductDto? _product;
+    private ApiProblem? _loadProblem;
+    private ApiProblem? _addProblem;
+    private bool _loading = true;
+    private bool _added;
+    private int _quantity = 1;
+    private int _view;
+    private bool _zoomed;
+    private (string Primary, string Secondary) _colours;
+
+    // How many more the customer may add (stock and line cap, minus what is already in the cart). 0 hides the form.
+    private int MaxQuantity => _product is null ? 0 : Cart.RemainingToAdd(_product);
+
+    private int PerOrderLimit => _product is null ? ProductLimits.DefaultPerLine : ProductLimits.PerLine(_product);
+    private int InCart => _product is null ? 0 : Cart.QuantityInCart(_product.Id);
+
+    // Explains the stepper's maximum: stock can be higher than what one order may contain (limited editions: 2).
+    private string QuantityHelp
+    {
+        get
+        {
+            var limit = _product!.IsLimitedEdition
+                ? $"Limited edition: limit {PerOrderLimit} per order."
+                : $"Up to {PerOrderLimit} per order.";
+            return InCart > 0 ? $"{limit} You have {InCart} in your cart, so you can add {MaxQuantity} more." : limit;
+        }
+    }
+
+    private string LimitReachedText => InCart >= PerOrderLimit
+        ? $"You already have {InCart} in your cart, the limit for this item is {PerOrderLimit} per order."
+        : $"You already have all {_product!.StockQuantity} available in your cart.";
+
+    // Exact stock is only shown when it is low; otherwise "10+" (stock levels are commercially sensitive).
+    private string Available => _product!.StockQuantity > 10 ? "10+" : _product.StockQuantity.ToString();
+
+    // Only facts we actually know about the product: no invented materials or care instructions.
+    private IEnumerable<string> Highlights
+    {
+        get
+        {
+            yield return $"Official {_product!.FranchiseName} merchandise";
+            if (_product.IsLimitedEdition) yield return $"Limited edition: up to {PerOrderLimit} per order";
+            yield return "Price includes all taxes";
+            yield return "Free delivery on orders of ₹999.00 or more";
+        }
+    }
+
+    protected override void OnInitialized() => Cart.Changed += OnCartChanged;
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private void OnCartChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Cart.Changed -= OnCartChanged;
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await Catalog.GetAsync(Id);
+        _loading = false;
+        _product = result.Value;
+        _loadProblem = result.Problem;
+        if (_product is not null) _colours = MerchArt.ColoursFor(_product.FranchiseCode);
+    }
+
+    private void Step(int delta) => _view = (_view + delta + Views.Length) % Views.Length;
+
+    private void SetQuantity(int quantity) => _quantity = Math.Clamp(quantity, 1, Math.Max(1, MaxQuantity));
+
+    // Photos get the light studio backdrop (they are shown whole, so it shows around them); illustrations get the stadium glow.
+    private string Backdrop(bool studio) => studio || _product?.ImageUrl is not null
+        ?"background: radial-gradient(circle at 50% 40%, #ffffff 0%, #e8ecf5 75%)"
+        : $"background: radial-gradient(circle at 50% 45%, {_colours.Primary}66 0%, transparent 62%), linear-gradient(160deg, #13245a 0%, #0a1636 100%)";
+
+    private async Task ShareAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", Nav.Uri);
+            Snackbar.Add("Link copied to clipboard.", Severity.Success);
+        }
+        catch (JSException)
+        {
+            Snackbar.Add("Could not copy the link. Copy it from the address bar instead.", Severity.Warning);
+        }
+    }
+
+    private async Task AddToCartAsync()
+    {
+        var user = (await Auth.GetAuthenticationStateAsync()).User;
+        if (user.Identity?.IsAuthenticated != true)
+        {
+            Nav.NavigateTo($"login?returnUrl={Uri.EscapeDataString($"products/{Id}")}");
+            return;
+        }
+
+        _added = false;
+        var result = await Cart.AddAsync(_product!.Id, _product.Name, _quantity);
+        Show(result);
+        if (result.Problem?.Code is "insufficient-stock" or "product-unavailable") await LoadAsync(); // show fresh stock
+    }
+
+    private async Task RetryAsync() => Show(await Cart.RetryAsync());
+
+    private void Show(ApiResult<CartDto> result)
+    {
+        if (result.Problem?.Code == "busy") return;
+        _addProblem = result.Problem;
+        _added = result.IsSuccess;
+        if (result.IsSuccess) _quantity = 1;
+    }
+}

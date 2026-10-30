@@ -1,0 +1,102 @@
+@page "/admin/products/new"
+@attribute [Authorize(Roles = "Admin")]
+@inject IAdminApi Admin
+@inject ICatalogApi Catalog
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>Admin · New product · IPL Fan Store</PageTitle>
+
+<section class="page-banner" aria-labelledby="new-title">
+    <div class="page-banner__inner">
+        <h1 id="new-title">New product</h1>
+        <p>Add a product to the catalogue</p>
+    </div>
+</section>
+
+<nav aria-label="Breadcrumb" class="breadcrumb">
+    <ol>
+        <li><a href="/"><MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" /> Home</a></li>
+        <li><a href="admin/products">Manage products</a></li>
+        <li aria-current="page">New product</li>
+    </ol>
+</nav>
+
+<div class="panel admin-form admin-form--narrow">
+    <EditForm Model="_model" OnValidSubmit="SaveAsync">
+        <DataAnnotationsValidator />
+        <h2 class="checkout-section-title">Product details</h2>
+        <div class="form-grid">
+            <MudTextField @bind-Value="_model.Name" For="@(() => _model.Name)" Label="Name" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            <MudSelect T="string" @bind-Value="_model.FranchiseCode" For="@(() => _model.FranchiseCode)" Label="Franchise" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var f in _franchises)
+                {
+                    <MudSelectItem T="string" Value="f.Code">@f.Name</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="ProductType?" @bind-Value="_model.Type" For="@(() => _model.Type)" Label="Type" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var type in Enum.GetValues<ProductType>())
+                {
+                    <MudSelectItem T="ProductType?" Value="type">@ProductCard.TypeName(type)</MudSelectItem>
+                }
+            </MudSelect>
+            <div class="admin-form__checks">
+                <MudCheckBox T="bool" @bind-Value="_model.IsFeatured" Label="Featured on the home page" Size="Size.Small" Color="Color.Primary" Dense="true" />
+            </div>
+            <MudNumericField T="decimal?" @bind-Value="_model.Price" For="@(() => _model.Price)" Label="Price (₹, incl. tax)" Format="0.00" Min="0.01m"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" HideSpinButtons="true" />
+            <MudNumericField T="int?" @bind-Value="_model.StockQuantity" For="@(() => _model.StockQuantity)" Label="Initial stock" Min="0"
+                             Variant="Variant.Outlined" Margin="Margin.Dense" HideSpinButtons="true" />
+            <MudTextField @bind-Value="_model.Description" For="@(() => _model.Description)" Label="Description" Lines="3" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Class="form-grid__wide" />
+        </div>
+        <h2 class="checkout-section-title">Photo <span class="checkout-section-title__note">(optional)</span></h2>
+        <ImagePicker @bind-Selected="_image" Type="@(_model.Type ?? ProductType.Other)" FranchiseCode="@_model.FranchiseCode" Disabled="_busy" />
+        <ProblemAlert Problem="_problem" />
+        <div class="admin-form__actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Href="admin/products" data-testid="cancel-new">Cancel</MudButton>
+            <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy">@(_busy ? "Saving…" : "Create product")</MudButton>
+        </div>
+    </EditForm>
+</div>
+
+@code {
+    private readonly CreateProductRequest _model = new();
+    private IReadOnlyList<FranchiseDto> _franchises = [];
+    private ApiProblem? _problem;
+    private bool _busy;
+    private ImageUpload? _image;
+
+    protected override async Task OnInitializedAsync() => _franchises = (await Catalog.GetFranchisesAsync()).Value ?? [];
+
+    /// <summary>Creates the product, then uploads the photo (the upload needs the new product's id and ETag).</summary>
+    private async Task SaveAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        _problem = null;
+        try
+        {
+            var created = await Admin.CreateAsync(_model);
+            if (!created.IsSuccess)
+            {
+                _problem = created.Problem;
+                return;
+            }
+            var product = created.Value!;
+            if (_image is not null)
+            {
+                var upload = await Admin.UploadImageAsync(product.Id, _image, product.ETag);
+                // The product exists now, so never offer "Create" again (that would make a duplicate): continue on its edit page.
+                if (!upload.IsSuccess)
+                    Snackbar.Add($"Product created, but the photo was not uploaded: {upload.Problem!.Message} You can add it on this page.",
+                        Severity.Warning, o => o.RequireInteraction = true);
+            }
+            Nav.NavigateTo($"admin/products/{product.Id}");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

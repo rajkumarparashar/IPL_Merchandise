@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- Thin host: serves the WebAssembly client and its runtime configuration. No business logic. -->
+  <PropertyGroup>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <!-- The SDK infers this from .razor files being present at restore time. The Dockerfile restores with only the
+         .csproj copied (layer caching), so without this line blazor.web.js is silently left out of the published app. -->
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\IPLMerchandise.Web.Client\IPLMerchandise.Web.Client.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,301 @@
+@page "/checkout"
+@attribute [Authorize(Roles = "Customer")]
+@inject CartState CartState
+@inject IOrdersApi Orders
+@inject CheckoutSession Session
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider Auth
+@inject IDialogService Dialogs
+@implements IDisposable
+
+<PageTitle>Checkout · IPL Fan Store</PageTitle>
+
+<section class="page-banner" aria-labelledby="checkout-title">
+    <div class="page-banner__inner">
+        <h1 id="checkout-title">Checkout</h1>
+        <p>Complete your order details</p>
+    </div>
+</section>
+
+<CartLiveUpdates />
+
+<LoadState Loading="_loading" Problem="_loadProblem" OnRetry="LoadAsync" LoadingText="Preparing your order…">
+    @if (_cart is { Lines.Count: 0 })
+    {
+        <div class="panel cart-empty">
+            <p>Your cart is empty.</p>
+            <MudButton Href="shop" Variant="Variant.Filled" Color="Color.Primary">Browse the store</MudButton>
+        </div>
+    }
+    else if (_cart is not null)
+    {
+        <div class="checkout-layout">
+            <div class="panel checkout-main">
+                <ol class="checkout-steps" aria-label="Checkout progress">
+                    <li class="@StepClass(0)" aria-current="@(_step == Step.Details ? "step" : null)"><span class="checkout-steps__dot">@StepMark(0)</span> Shipping</li>
+                    <li class="@StepClass(1)"><span class="checkout-steps__dot">@StepMark(1)</span> Payment</li>
+                    <li class="@StepClass(2)" aria-current="@(_step == Step.Review ? "step" : null)"><span class="checkout-steps__dot">@StepMark(2)</span> Review</li>
+                </ol>
+
+                @if (_cart.RequiresReview)
+                {
+                    @* Shown on both steps as soon as a background check (or a refused checkout) finds a change. *@
+                    <div class="review-banner" role="alert" data-testid="review-banner">
+                        <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Size="Size.Small" />
+                        <div>
+                            <strong>Prices or stock changed since you added these items.</strong>
+                            Your total will change from <Rupees Amount="_cart.Total" /> to <strong><Rupees Amount="_cart.TotalAfterAccept" /></strong>.
+                            <MudLink Href="cart">See what changed</MudLink>
+                        </div>
+                        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="AcceptAsync" Disabled="CartState.IsBusy" data-testid="accept-changes">
+                            Accept new total
+                        </MudButton>
+                    </div>
+                    <ProblemAlert Problem="CartState.LastProblem" OnRetry="AcceptAsync" RetryDisabled="CartState.IsBusy" />
+                }
+
+                @if (_step == Step.Details)
+                {
+                    <EditForm Model="_address" OnValidSubmit="GoToReview" OnInvalidSubmit="() => _termsError = !_acceptTerms" data-testid="details-form">
+                        <DataAnnotationsValidator />
+
+                        <h2 class="checkout-section-title">Shipping Address</h2>
+                        <div class="form-grid">
+                            <MudTextField @bind-Value="_address.FullName" For="@(() => _address.FullName)" Label="Full Name" Required="true" RequiredError="Enter your full name."
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" UserAttributes="@(new() { ["id"] = "fullName", ["autocomplete"] = "name" })" />
+                            <MudTextField @bind-Value="_address.Mobile" For="@(() => _address.Mobile)" Label="Mobile Number" Required="true"
+                                          Adornment="Adornment.Start" AdornmentText="+91" MaxLength="10" InputMode="InputMode.tel"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" UserAttributes="@(new() { ["id"] = "mobile", ["autocomplete"] = "tel-national" })" />
+                            <MudTextField @bind-Value="_address.Line1" For="@(() => _address.Line1)" Label="Address Line 1" Required="true"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" UserAttributes="@(new() { ["id"] = "line1", ["autocomplete"] = "address-line1" })" />
+                            <MudTextField @bind-Value="_address.Line2" For="@(() => _address.Line2)" Label="Address Line 2"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" UserAttributes="@(new() { ["id"] = "line2", ["autocomplete"] = "address-line2" })" />
+                        </div>
+                        <div class="form-grid form-grid--3">
+                            <MudTextField @bind-Value="_address.City" For="@(() => _address.City)" Label="City" Required="true"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" UserAttributes="@(new() { ["id"] = "city", ["autocomplete"] = "address-level2" })" />
+                            <MudSelect T="string" @bind-Value="_address.State" For="@(() => _address.State)" Label="State" Required="true"
+                                       Variant="Variant.Outlined" Margin="Margin.Dense" AnchorOrigin="Origin.BottomCenter">
+                                @foreach (var state in IndianStates.All)
+                                {
+                                    <MudSelectItem T="string" Value="state">@state</MudSelectItem>
+                                }
+                            </MudSelect>
+                            <MudTextField @bind-Value="_address.PinCode" For="@(() => _address.PinCode)" Label="PIN Code" Required="true" MaxLength="6"
+                                          InputMode="InputMode.numeric" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                          UserAttributes="@(new() { ["id"] = "pinCode", ["autocomplete"] = "postal-code" })" />
+                        </div>
+
+                        <h2 class="checkout-section-title">Payment Method</h2>
+                        @* Online payment is not integrated (see README). The options are shown but disabled, so nothing pretends to take money. *@
+                        <MudRadioGroup T="string" Value="@("cod")" Class="payment-options">
+                            <MudRadio T="string" Value="@("upi")" Disabled="true" Color="Color.Primary">UPI <span class="payment-options__soon">(coming soon)</span></MudRadio>
+                            <MudRadio T="string" Value="@("card")" Disabled="true" Color="Color.Primary">Credit / Debit Card <span class="payment-options__soon">(coming soon)</span></MudRadio>
+                            <MudRadio T="string" Value="@("netbanking")" Disabled="true" Color="Color.Primary">Net Banking <span class="payment-options__soon">(coming soon)</span></MudRadio>
+                            <MudRadio T="string" Value="@("cod")" Color="Color.Primary">Cash on Delivery</MudRadio>
+                        </MudRadioGroup>
+
+                        <div class="checkout-terms">
+                            <MudCheckBox T="bool" @bind-Value="_acceptTerms" Color="Color.Primary" Size="Size.Small" data-testid="accept-terms">
+                                I agree to the <a href="terms" @onclick="OpenTermsAsync" @onclick:preventDefault @onclick:stopPropagation data-testid="terms-link">terms and conditions</a>
+                            </MudCheckBox>
+                            @if (_termsError && !_acceptTerms)
+                            {
+                                <p class="field-error" role="alert">Please accept the terms and conditions to continue.</p>
+                            }
+                        </div>
+
+                        <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Size="Size.Large"
+                                   EndIcon="@Icons.Material.Filled.ArrowForward" Class="checkout-primary" data-testid="continue-to-review">
+                            Continue to review
+                        </MudButton>
+                    </EditForm>
+                }
+                else
+                {
+                    <h2 class="checkout-section-title">Review your order</h2>
+                    <div class="review-blocks">
+                        <div class="review-block">
+                            <div class="review-block__head"><h3>Deliver to</h3><button type="button" class="link-button" @onclick="() => _step = Step.Details">Change</button></div>
+                            <address data-testid="review-address">
+                                <strong>@_address.FullName</strong><br />
+                                @_address.Line1@(string.IsNullOrWhiteSpace(_address.Line2) ? "" : $", {_address.Line2}")<br />
+                                @_address.City, @_address.State @_address.PinCode<br />
+                                +91 @_address.Mobile
+                            </address>
+                        </div>
+                        <div class="review-block">
+                            <div class="review-block__head"><h3>Payment</h3><button type="button" class="link-button" @onclick="() => _step = Step.Details">Change</button></div>
+                            <p>Cash on Delivery</p>
+                        </div>
+                    </div>
+
+                    <ProblemAlert Problem="_problem" OnRetry="PlaceOrderAsync" RetryDisabled="_submitting" />
+                    @if (_problem?.Code is "checkout-rejected" or "cart-requires-review" or "total-mismatch")
+                    {
+                        <p class="mb-3">Nothing has been charged and your cart is unchanged. <MudLink Href="cart">Go to your cart</MudLink></p>
+                    }
+
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" FullWidth="true" OnClick="PlaceOrderAsync"
+                               Disabled="_submitting || _cart.RequiresReview" Class="checkout-primary" data-testid="place-order">
+                        @if (_submitting)
+                        {
+                            <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" aria-hidden="true" />
+                            <span>Placing order…</span>
+                        }
+                        else
+                        {
+                            <span>Place order for @Money.Format(_cart.Total)</span>
+                        }
+                    </MudButton>
+                    <p class="checkout-note">You pay in cash when your order is delivered.</p>
+                }
+            </div>
+
+            <aside class="panel order-summary" aria-labelledby="review-title">
+                <div class="order-summary__head">
+                    <h2 id="review-title">Order Review</h2>
+                    <a href="cart" class="link-button"><MudIcon Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" /> Edit Cart</a>
+                </div>
+                <ul class="review-items">
+                    @foreach (var line in _cart.Lines)
+                    {
+                        var colours = MerchArt.ColoursFor(line.FranchiseCode);
+                        <li>
+                            <span class="cart-product__thumb review-items__thumb" aria-hidden="true"
+                                  style="@($"background: radial-gradient(circle at 50% 45%, {colours.Primary}66 0%, transparent 65%), linear-gradient(160deg, #13245a, #0a1636)")">
+                                <ProductPhoto ImageUrl="@line.ImageUrl" Type="@(line.Type ?? ProductType.Other)" FranchiseCode="@line.FranchiseCode" />
+                            </span>
+                            <span class="review-items__info">
+                                <strong>@line.ProductName</strong>
+                                <span><Rupees Amount="line.UnitPrice" /></span>
+                                <span class="review-items__qty">Qty: @line.Quantity</span>
+                            </span>
+                            <span class="review-items__total"><Rupees Amount="line.LineTotal" /></span>
+                        </li>
+                    }
+                </ul>
+                <dl>
+                    <dt>Subtotal</dt><dd><Rupees Amount="_cart.Subtotal" /></dd>
+                    <dt>Taxes</dt><dd>Included in prices</dd>
+                    <dt>Shipping</dt><dd class="@(_cart.ShippingFee == 0 ? "is-free" : "")">@(_cart.ShippingFee == 0 ? "FREE" : Money.Format(_cart.ShippingFee))</dd>
+                </dl>
+                <div class="order-summary__total"><span>Total</span><span data-testid="checkout-total"><Rupees Amount="_cart.Total" /></span></div>
+                <p class="secure-note"><MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" /> Your details are used only to deliver your order</p>
+            </aside>
+        </div>
+    }
+</LoadState>
+
+@code {
+    private enum Step { Details, Review }
+
+    private CartDto? _cart;
+    private ApiProblem? _loadProblem;
+    private ApiProblem? _problem;
+    private bool _loading = true;
+    private bool _submitting;
+    private Step _step = Step.Details;
+    private readonly ShippingAddressDto _address = new();
+    private bool _acceptTerms;
+    private bool _termsError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await Auth.GetAuthenticationStateAsync()).User;
+        _address.FullName = user.Identity?.Name ?? "";
+        CartState.Changed += OnCartChanged;
+        await LoadAsync();
+    }
+
+    // Background checks and "Accept new total" update the shared cart; show them here too. Not while an order is
+    // being placed: the cart empties on success and the page should go straight to the order instead.
+    private void OnCartChanged()
+    {
+        if (_submitting || CartState.Cart is null) return;
+        _cart = CartState.Cart;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => CartState.Changed -= OnCartChanged;
+
+    private async Task AcceptAsync()
+    {
+        var result = await CartState.AcceptChangesAsync();
+        if (result.IsSuccess) _problem = null; // an earlier "prices changed" refusal no longer applies
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var result = await CartState.LoadAsync();
+        _cart = result.Value;
+        _loadProblem = result.Problem;
+        _loading = false;
+    }
+
+    // The address passed DataAnnotations; the terms box is checked here because it is not part of the address.
+    private void GoToReview()
+    {
+        if (!_acceptTerms)
+        {
+            _termsError = true;
+            return;
+        }
+        _address.Mobile = _address.Mobile.Trim();
+        _step = Step.Review;
+    }
+
+    // Opens the terms in a centred dialog so the customer keeps the half-filled form; /terms remains the link target as a fallback.
+    private Task OpenTermsAsync() => Dialogs.ShowAsync<TermsDialog>("Terms and conditions", new DialogOptions
+    {
+        CloseButton = true,
+        CloseOnEscapeKey = true,
+        MaxWidth = MaxWidth.Medium,
+        FullWidth = true,
+        Position = DialogPosition.Center
+    });
+
+    private string StepClass(int index) => (_step, index) switch
+    {
+        (Step.Details, 0) or (Step.Details, 1) => "is-active",
+        (Step.Review, 2) => "is-active",
+        (Step.Review, _) => "is-done",
+        _ => ""
+    };
+
+    private string StepMark(int index) => _step == Step.Review && index < 2 ? "✓" : (index + 1).ToString();
+
+    private async Task PlaceOrderAsync()
+    {
+        if (_submitting || _cart is null) return; // double-click guard (the button is disabled too)
+        _submitting = true;
+        _problem = null;
+        try
+        {
+            // Same order id for every attempt until the order is confirmed: retries can never create a second order.
+            var orderId = await Session.GetOrCreateOrderIdAsync();
+            var result = await Orders.CheckoutAsync(orderId, _cart.Total, _address);
+
+            if (result.IsSuccess)
+            {
+                await Session.CompleteAsync();
+                await CartState.LoadAsync();
+                Nav.NavigateTo($"orders/{result.Value!.Id}?placed=true");
+                return;
+            }
+
+            _problem = result.Problem;
+            if (_problem!.Code is "cart-requires-review" or "total-mismatch" or "checkout-rejected")
+            {
+                // Definitive "no": no order exists for this id, so the next attempt can use a fresh one.
+                await Session.CompleteAsync();
+                await LoadAsync();
+            }
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+}

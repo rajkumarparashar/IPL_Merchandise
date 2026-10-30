@@ -1,0 +1,260 @@
+@page "/shop"
+@inject ICatalogApi Catalog
+
+<PageTitle>Shop · IPL Fan Store</PageTitle>
+
+<h1 class="page-title">Shop all merchandise</h1>
+
+<EditForm Model="_filters" OnSubmit="SearchAsync" class="filter-bar" role="search" aria-label="Search products">
+    <MudTextField @bind-Value="_filters.Search" Placeholder="Search products by name..." Variant="Variant.Outlined" Margin="Margin.Dense"
+                  MaxLength="ApiLimits.MaxSearchLength" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  UserAttributes="@(new() { ["id"] = "search", ["aria-label"] = "Search products by name" })" />
+    <MudSelect T="ProductType" Label="Product Type" Placeholder="All Types" ShrinkLabel="true" Variant="Variant.Outlined" Margin="Margin.Dense"
+               MultiSelection="true" SelectedValues="_types" SelectedValuesChanged="OnTypesSelected"
+               MultiSelectionTextFunc="@(list => string.Join(", ", (list ?? []).Select(v => ProductCard.TypeName(Enum.Parse<ProductType>(v!)))))">
+        @foreach (var type in Enum.GetValues<ProductType>())
+        {
+            <MudSelectItem T="ProductType" Value="type">@ProductCard.TypeName(type)</MudSelectItem>
+        }
+    </MudSelect>
+    <MudSelect T="string" Label="Franchise" Placeholder="All Franchises" ShrinkLabel="true" Variant="Variant.Outlined" Margin="Margin.Dense"
+               MultiSelection="true" SelectedValues="_franchises" SelectedValuesChanged="OnFranchisesSelected"
+               MultiSelectionTextFunc="@(list => string.Join(", ", list ?? []))">
+        @foreach (var f in FranchiseFacets)
+        {
+            <MudSelectItem T="string" Value="f.Code">@f.Name</MudSelectItem>
+        }
+    </MudSelect>
+    <MudSelect T="int" Label="Per page" Value="_filters.PageSize" ValueChanged="OnPageSizeChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+        @foreach (var size in new[] { 2, 10, 20, 50 })
+        {
+            <MudSelectItem T="int" Value="size">@size</MudSelectItem>
+        }
+    </MudSelect>
+    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FilterList"
+               Disabled="_loading" Class="filter-bar__button">Search</MudButton>
+</EditForm>
+
+@if (_page is not null)
+{
+    <div class="results-bar">
+        <p class="results-bar__summary" role="status" aria-live="polite" data-testid="result-summary">
+            @if (_page.Items.Count == 0)
+            {
+                <span>No products match your search.</span>
+            }
+            else
+            {
+                <span>Showing @(_offset + 1)–@(_offset + _page.Items.Count) of @_total products</span>
+            }
+        </p>
+        <div class="results-bar__sort">
+            <span id="sort-label">Sort by</span>
+            <MudSelect T="ProductSort" Value="_sort" ValueChanged="OnSortChanged" Variant="Variant.Outlined" Margin="Margin.Dense"
+                       UserAttributes="@(new() { ["aria-labelledby"] = "sort-label" })">
+                <MudSelectItem T="ProductSort" Value="ProductSort.Featured">Featured</MudSelectItem>
+                <MudSelectItem T="ProductSort" Value="ProductSort.PriceLowToHigh">Price: Low to High</MudSelectItem>
+                <MudSelectItem T="ProductSort" Value="ProductSort.PriceHighToLow">Price: High to Low</MudSelectItem>
+                <MudSelectItem T="ProductSort" Value="ProductSort.NameAToZ">Name: A to Z</MudSelectItem>
+            </MudSelect>
+        </div>
+    </div>
+}
+
+<div class="catalogue-layout">
+    <aside class="filters-panel" aria-label="Filters">
+        <div class="filters-panel__header">
+            <h2>Filters</h2>
+            <button type="button" class="link-button" @onclick="ClearAllAsync">Clear all</button>
+        </div>
+
+        <fieldset class="filters-panel__group">
+            <legend>Product Type</legend>
+            @foreach (var type in Enum.GetValues<ProductType>())
+            {
+                var t = type;
+                <MudCheckBox T="bool" Value="_types.Contains(t)" ValueChanged="@(v => ToggleTypeAsync(t, v))" Size="Size.Small" Dense="true"
+                             Label="@($"{ProductCard.TypeName(t)} ({TypeCount(t)})")" Color="Color.Primary" />
+            }
+        </fieldset>
+
+        <fieldset class="filters-panel__group">
+            <legend>Franchise</legend>
+            @foreach (var f in FranchiseFacets.Where(f => f.Count > 0 || _franchises.Contains(f.Code)))
+            {
+                var code = f.Code;
+                <MudCheckBox T="bool" Value="_franchises.Contains(code)" ValueChanged="@(v => ToggleFranchiseAsync(code, v))" Size="Size.Small" Dense="true"
+                             Label="@($"{code} ({f.Count})")" title="@f.Name" Color="Color.Primary" />
+            }
+        </fieldset>
+    </aside>
+
+    <div class="catalogue-results">
+        <LoadState Loading="_loading" Problem="_problem" OnRetry="ReloadPageAsync" LoadingText="Loading products…">
+            @if (_page is not null)
+            {
+                <ProductGrid Products="_page.Items" />
+
+                @if (_tokens.Count > 0 || _page.ContinuationToken is not null)
+                {
+                    <nav aria-label="Pagination" class="pager">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="PreviousAsync" Disabled="_tokens.Count == 0" data-testid="prev-page">Previous</MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="NextAsync" Disabled="_page.ContinuationToken is null" data-testid="next-page">Next</MudButton>
+                    </nav>
+                }
+            }
+        </LoadState>
+    </div>
+</div>
+
+
+
+@code {
+    /// <summary>Search text from the header search box (/shop?search=...).</summary>
+    [SupplyParameterFromQuery(Name = "search")] public string? SearchFromUrl { get; set; }
+
+    /// <summary>Deep links such as /shop?type=Jersey (footer) or /shop?franchise=MI.</summary>
+    [SupplyParameterFromQuery(Name = "type")] public string? TypeFromUrl { get; set; }
+    [SupplyParameterFromQuery(Name = "franchise")] public string? FranchiseFromUrl { get; set; }
+
+    private sealed class Filters
+    {
+        public string? Search { get; set; }
+        public int PageSize { get; set; } = ApiLimits.DefaultPageSize;
+    }
+
+    private readonly Filters _filters = new();
+    private HashSet<ProductType> _types = [];
+    private HashSet<string> _franchises = [];
+    private ProductSort _sort = ProductSort.Featured;
+
+    private ProductFacetsDto? _facets;
+    private string? _facetsFor = "\0"; // search text the current facet counts belong to
+
+    private PagedResult<ProductDto>? _page;
+    private ApiProblem? _problem;
+    private bool _loading;
+    private long? _total;
+    private int _offset;
+    private bool _initialised;
+    private string? _appliedUrl;
+
+    // Keyset paging only moves forward, so "Previous" replays the token that produced the earlier page.
+    private readonly Stack<string?> _tokens = new();
+    private string? _currentToken;
+    private ProductQuery _query = new();
+
+    private IEnumerable<FranchiseFacet> FranchiseFacets => _facets?.Franchises ?? [];
+    private int TypeCount(ProductType type) => _facets?.Types.FirstOrDefault(t => t.Type == type)?.Count ?? 0;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // First visit, or a new search / deep link from the header or footer.
+        var url = $"{SearchFromUrl}|{TypeFromUrl}|{FranchiseFromUrl}";
+        if (_initialised && url == _appliedUrl) return;
+        var firstVisit = !_initialised;
+        _initialised = true;
+        _appliedUrl = url;
+        if (!firstVisit || SearchFromUrl is not null || TypeFromUrl is not null || FranchiseFromUrl is not null)
+        {
+            _filters.Search = SearchFromUrl;
+            _types = Enum.TryParse<ProductType>(TypeFromUrl, ignoreCase: true, out var type) ? [type] : [];
+            _franchises = string.IsNullOrWhiteSpace(FranchiseFromUrl) ? [] : [FranchiseFromUrl.Trim().ToUpperInvariant()];
+        }
+        await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        _query = new ProductQuery(_filters.Search, _types.ToList(), _franchises.ToList(), _sort, _filters.PageSize);
+        _tokens.Clear();
+        _offset = 0;
+        _total = null;
+        await Task.WhenAll(LoadAsync(null), LoadFacetsAsync());
+    }
+
+    private async Task LoadFacetsAsync()
+    {
+        var search = _filters.Search?.Trim() ?? "";
+        if (search == _facetsFor) return; // counts depend only on the search text
+        var result = await Catalog.GetFacetsAsync(search);
+        if (result.IsSuccess)
+        {
+            _facets = result.Value;
+            _facetsFor = search;
+        }
+    }
+
+    // MudSelect declares SelectedValuesChanged as EventCallback<IEnumerable<T?>?>: the collection itself may be null, and for
+    // reference types so may its items. Null means "nothing selected"; null items are dropped.
+    private Task OnTypesSelected(IEnumerable<ProductType>? selected)
+    {
+        _types = selected?.ToHashSet() ?? [];
+        return SearchAsync();
+    }
+
+    private Task OnFranchisesSelected(IEnumerable<string?>? selected)
+    {
+        _franchises = selected?.OfType<string>().ToHashSet() ?? [];
+        return SearchAsync();
+    }
+    private Task OnSortChanged(ProductSort sort) { _sort = sort; return SearchAsync(); }
+    private Task OnPageSizeChanged(int size) { _filters.PageSize = size; return SearchAsync(); }
+
+    private Task ToggleTypeAsync(ProductType type, bool on)
+    {
+        _types = new HashSet<ProductType>(_types);
+        if (on) _types.Add(type); else _types.Remove(type);
+        return SearchAsync();
+    }
+
+    private Task ToggleFranchiseAsync(string code, bool on)
+    {
+        _franchises = new HashSet<string>(_franchises);
+        if (on) _franchises.Add(code); else _franchises.Remove(code);
+        return SearchAsync();
+    }
+
+    private Task ClearAllAsync()
+    {
+        _filters.Search = null;
+        _types = [];
+        _franchises = [];
+        _sort = ProductSort.Featured;
+        return SearchAsync();
+    }
+
+    private async Task NextAsync()
+    {
+        if (_page?.ContinuationToken is not { } next) return;
+        _tokens.Push(_currentToken);
+        _offset += _page.Items.Count;
+        await LoadAsync(next);
+    }
+
+    private async Task PreviousAsync()
+    {
+        if (_tokens.Count == 0) return;
+        _offset = Math.Max(0, _offset - _query.PageSize);
+        await LoadAsync(_tokens.Pop());
+    }
+
+    private Task ReloadPageAsync() => LoadAsync(_currentToken);
+
+    private async Task LoadAsync(string? token)
+    {
+        _loading = true;
+        _problem = null;
+        var result = await Catalog.SearchAsync(_query, token);
+        _loading = false;
+        if (!result.IsSuccess)
+        {
+            _problem = result.Problem;
+            return;
+        }
+        _page = result.Value;
+        _currentToken = token;
+        _total = _page!.TotalCount ?? _total; // the API only counts on the first page
+    }
+
+}

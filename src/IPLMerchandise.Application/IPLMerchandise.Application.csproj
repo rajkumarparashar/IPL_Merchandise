@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\IPLMerchandise.Domain\IPLMerchandise.Domain.csproj" />
+    <ProjectReference Include="..\IPLMerchandise.Contracts\IPLMerchandise.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+  </ItemGroup>
+</Project>

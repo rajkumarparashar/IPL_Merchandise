@@ -1,0 +1,87 @@
+@page "/admin/products/{Id}/audit"
+@attribute [Authorize(Roles = "Admin")]
+@inject IAdminApi Admin
+@inject UserTimeZone TimeZone
+
+<PageTitle>Admin · Price and stock history · IPL Fan Store</PageTitle>
+
+<section class="page-banner" aria-labelledby="audit-title">
+    <div class="page-banner__inner">
+        <h1 id="audit-title">Price and stock history</h1>
+        <p>Every change, who made it and why</p>
+    </div>
+</section>
+
+<nav aria-label="Breadcrumb" class="breadcrumb">
+    <ol>
+        <li><a href="/"><MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" /> Home</a></li>
+        <li><a href="admin/products">Manage products</a></li>
+        <li><a href="@($"admin/products/{Id}")">Edit product</a></li>
+        <li aria-current="page">History</li>
+    </ol>
+</nav>
+
+<LoadState Loading="_loading && _items.Count == 0" Problem="_problem" OnRetry="() => LoadAsync(_token)">
+    @if (_items.Count == 0)
+    {
+        <MudText>No changes recorded.</MudText>
+    }
+    else
+    {
+        <div class="panel admin-table">
+        <table class="cart-table">
+            <caption class="sr-only">Changes, newest first</caption>
+            <thead><tr><th scope="col">When</th><th scope="col">Field</th><th scope="col">Old</th><th scope="col">New</th><th scope="col">Reason</th><th scope="col">By</th></tr></thead>
+            <tbody>
+                @foreach (var a in _items)
+                {
+                    <tr data-testid="audit-row">
+                        <td>@TimeZone.Format(a.ChangedAtUtc)</td>
+                        <td>@a.Field</td>
+                        <td>@Show(a.Field, a.OldValue)</td>
+                        <td>@Show(a.Field, a.NewValue)</td>
+                        <td>@Reason(a)</td>
+                        <td>@a.ChangedBy</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        </div>
+        @if (_token is not null)
+        {
+            <MudButton Variant="Variant.Outlined" Class="mt-3" OnClick="() => LoadAsync(_token)" Disabled="_loading">Load more</MudButton>
+        }
+    }
+</LoadState>
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private readonly List<AuditEntryDto> _items = [];
+    private string? _token;
+    private ApiProblem? _problem;
+    private bool _loading = true;
+
+    protected override Task OnInitializedAsync() => LoadAsync(null);
+
+    private async Task LoadAsync(string? token)
+    {
+        _loading = true;
+        _problem = null;
+        var result = await Admin.GetAuditAsync(Id, token);
+        _loading = false;
+        if (!result.IsSuccess) { _problem = result.Problem; return; }
+        _items.AddRange(result.Value!.Items);
+        _token = result.Value.ContinuationToken;
+    }
+
+    private static string Show(AuditField field, decimal value) => field == AuditField.Price ? Money.Format(value) : ((int)value).ToString();
+
+    private static string Reason(AuditEntryDto a) => a.Reason switch
+    {
+        // Same "#IPL-…" number the customer sees; an entry without a readable order id still says it came from an order.
+        AuditReason.Order => Guid.TryParse(a.OrderId, out var orderId) ? $"Order {OrderNumber.Format(orderId)}" : "Order",
+        AuditReason.ManualAdjustment => $"Manual: {a.Note}",
+        _ => a.Note ?? "Created"
+    };
+}

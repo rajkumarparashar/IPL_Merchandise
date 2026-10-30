@@ -1,0 +1,49 @@
+@page "/register"
+@inject IAuthApi AuthApi
+@inject JwtAuthStateProvider AuthProvider
+@inject CartState Cart
+@inject NavigationManager Nav
+
+<PageTitle>Create account</PageTitle>
+<MudPaper Class="pa-6 mx-auto" MaxWidth="460px" Elevation="1">
+    <MudText Typo="Typo.h4" HtmlTag="h1" Class="mb-4">Create your account</MudText>
+
+    <EditForm Model="_model" OnValidSubmit="SubmitAsync">
+        <DataAnnotationsValidator />
+        <MudTextField @bind-Value="_model.DisplayName" For="@(() => _model.DisplayName)" Label="Your name" Variant="Variant.Outlined" Class="mb-3"
+                      UserAttributes="@(new() { ["autocomplete"] = "name", ["id"] = "name" })" />
+        <MudTextField @bind-Value="_model.Email" For="@(() => _model.Email)" Label="Email" InputType="InputType.Email" Variant="Variant.Outlined" Class="mb-3"
+                      UserAttributes="@(new() { ["autocomplete"] = "email", ["id"] = "email" })" />
+        <MudTextField @bind-Value="_model.Password" For="@(() => _model.Password)" Label="Password" InputType="InputType.Password" Variant="Variant.Outlined" Class="mb-3"
+                      HelperText="At least 8 characters, with a letter and a digit."
+                      UserAttributes="@(new() { ["autocomplete"] = "new-password", ["id"] = "password" })" />
+        <ProblemAlert Problem="_problem" />
+        <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Disabled="_busy">
+            @(_busy ? "Creating account…" : "Create account")
+        </MudButton>
+    </EditForm>
+    <MudText Class="mt-4">Already registered? <MudLink Href="login">Sign in</MudLink></MudText>
+</MudPaper>
+
+@code {
+    private readonly RegisterRequest _model = new();
+    private ApiProblem? _problem;
+    private bool _busy;
+
+    private async Task SubmitAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        _problem = null;
+        var result = await AuthApi.RegisterAsync(_model);
+        _busy = false;
+        if (!result.IsSuccess)
+        {
+            _problem = result.Problem;
+            return;
+        }
+        await AuthProvider.SignInAsync(result.Value!);
+        await Cart.LoadAsync();
+        Nav.NavigateTo("");
+    }
+}

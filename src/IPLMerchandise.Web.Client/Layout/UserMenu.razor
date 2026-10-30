@@ -1,0 +1,33 @@
+<AuthorizeView>
+    <Authorized>
+        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" aria-label="Account menu">
+            <ActivatorContent>
+                <button type="button" class="user-menu__button">
+                    <MudIcon Icon="@Icons.Material.Outlined.PersonOutline" Size="Size.Small" />
+                    <span class="user-menu__name">Hello, @FirstName(context.User.Identity?.Name)</span>
+                    <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small" />
+                </button>
+            </ActivatorContent>
+            <ChildContent>
+                <MudMenuItem Href="orders">My orders</MudMenuItem>
+                <AuthorizeView Roles="Admin" Context="admin">
+                    <MudMenuItem Href="admin/products">Manage products</MudMenuItem>
+                </AuthorizeView>
+                <MudMenuItem OnClick="OnSignOut">Sign out</MudMenuItem>
+            </ChildContent>
+        </MudMenu>
+    </Authorized>
+    <NotAuthorized>
+        <a href="login" class="user-menu__button" aria-label="Sign in">
+            <MudIcon Icon="@Icons.Material.Outlined.PersonOutline" Size="Size.Small" /><span class="user-menu__name">Sign in</span>
+        </a>
+        <a href="register" class="header-link">Register</a>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    [Parameter] public EventCallback OnSignOut { get; set; }
+
+    private static string FirstName(string? name) =>
+        string.IsNullOrWhiteSpace(name) ? "there" : name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+}

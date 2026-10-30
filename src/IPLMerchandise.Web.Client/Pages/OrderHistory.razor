@@ -1,0 +1,236 @@
+@page "/orders"
+@attribute [Authorize(Roles = "Customer")]
+@implements IDisposable
+@inject IOrdersApi OrdersApi
+@inject UserTimeZone TimeZone
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<PageTitle>My orders · IPL Fan Store</PageTitle>
+
+<section class="page-banner" aria-labelledby="orders-title">
+    <div class="page-banner__inner">
+        <h1 id="orders-title">My Orders</h1>
+        <p>Track and manage your orders</p>
+    </div>
+</section>
+
+<div class="panel order-stats" data-testid="order-stats">
+    <div class="order-stats__item">
+        <span class="order-stats__icon"><MudIcon Icon="@Icons.Material.Outlined.Inventory2" /></span>
+        <div><span class="order-stats__label">Total Orders</span><strong>@(_stats?.TotalOrders.ToString() ?? "–")</strong></div>
+    </div>
+    <div class="order-stats__item">
+        <span class="order-stats__icon"><MudIcon Icon="@Icons.Material.Outlined.Schedule" /></span>
+        <div><span class="order-stats__label">Spent in last 30 days</span><strong>@(_stats is null ? "–" : Money.Format(_stats.SpentLast30Days))</strong></div>
+    </div>
+    <div class="order-stats__item">
+        <span class="order-stats__icon"><MudIcon Icon="@Icons.Material.Outlined.CurrencyRupee" /></span>
+        <div><span class="order-stats__label">Total Spent</span><strong>@(_stats is null ? "–" : Money.Format(_stats.TotalSpent))</strong></div>
+    </div>
+</div>
+
+<EditForm Model="this" OnSubmit="SearchAsync" class="panel orders-filters" role="search" aria-label="Filter orders">
+    <MudTextField T="string" @bind-Value="_orderSearch" Placeholder="Search by order ID..." Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" MaxLength="40"
+                  UserAttributes="@(new() { ["id"] = "order-search", ["aria-label"] = "Search by order ID" })" />
+    <MudSelect T="string" @bind-Value="_range" Label="Date Range" Variant="Variant.Outlined" Margin="Margin.Dense">
+        @foreach (var (value, label) in Ranges)
+        {
+            <MudSelectItem T="string" Value="value">@label</MudSelectItem>
+        }
+    </MudSelect>
+    <MudSelect T="string" @bind-Value="_status" Label="Order Status" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelectItem T="string" Value="@("")">All</MudSelectItem>
+        @foreach (var status in Enum.GetValues<OrderStatus>())
+        {
+            <MudSelectItem T="string" Value="@status.ToString()">@status</MudSelectItem>
+        }
+    </MudSelect>
+    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Disabled="_loading" Class="orders-filters__button">Apply filters</MudButton>
+
+    @if (_range == "custom")
+    {
+        <div class="orders-filters__custom">
+            <MudTextField T="string" @bind-Value="_from" Label="From date" InputType="InputType.Date" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          UserAttributes="@(new() { ["id"] = "from-date" })" />
+            <MudTextField T="string" @bind-Value="_to" Label="To date (inclusive)" InputType="InputType.Date" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          UserAttributes="@(new() { ["id"] = "to-date" })" />
+        </div>
+    }
+    @if (_rangeError is not null)
+    {
+        <p class="field-error orders-filters__error" role="alert" data-testid="range-error">@_rangeError</p>
+    }
+</EditForm>
+
+<div class="orders-toolbar">
+    <label for="tz-select">Times shown in</label>
+    <select id="tz-select" class="native-select" value="@TimeZone.Selected" @onchange="e => TimeZone.SetAsync(e.Value?.ToString() ?? UserTimeZone.Ist)">
+        @foreach (var (id, label) in UserTimeZone.Choices)
+        {
+            <option value="@id">@label</option>
+        }
+    </select>
+</div>
+
+<LoadState Loading="_loading && _orders.Count == 0" Problem="_problem" OnRetry="ReloadAsync" LoadingText="Loading your orders…">
+    @if (_orders.Count == 0)
+    {
+        <div class="panel cart-empty">
+            <p>No orders match these filters.</p>
+            <MudButton Href="shop" Variant="Variant.Filled" Color="Color.Primary">Start shopping</MudButton>
+        </div>
+    }
+    else
+    {
+        <ul class="panel order-list" aria-label="Your orders, newest first">
+            @foreach (var order in _orders)
+            {
+                var items = order.Items ?? [];
+                <li class="order-row" data-testid="order-row">
+                    <div class="order-row__main">
+                        <div class="order-row__id">
+                            Order ID: <strong>@OrderNumber.Format(order.Id)</strong>
+                            <button type="button" class="icon-link" aria-label="@($"Copy order number {OrderNumber.Format(order.Id)}")" @onclick="() => CopyAsync(order.Id)">
+                                <MudIcon Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" />
+                            </button>
+                        </div>
+                        <div class="order-row__date">Order Date: @TimeZone.Format(order.CreatedAtUtc)</div>
+                        <div class="order-row__thumbs" aria-label="@($"{order.ItemCount} items")">
+                            @foreach (var item in items.Take(3))
+                            {
+                                var colours = MerchArt.ColoursFor(item.FranchiseCode);
+                                <span class="order-row__thumb" title="@item.ProductName"
+                                      style="@($"background: radial-gradient(circle at 50% 45%, {colours.Primary}66 0%, transparent 65%), linear-gradient(160deg, #13245a, #0a1636)")">
+                                    <ProductPhoto ImageUrl="@item.ImageUrl" Type="@(item.Type ?? ProductType.Other)" FranchiseCode="@item.FranchiseCode" />
+                                </span>
+                            }
+                            @if (items.Count > 3)
+                            {
+                                <span class="order-row__more">+@(items.Count - 3) more</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="order-row__amount">
+                        <span>Total Amount</span>
+                        <strong><Rupees Amount="order.Total" /></strong>
+                    </div>
+                    <span class="status-chip status-chip--@order.Status.ToString().ToLowerInvariant()">
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" /> @order.Status
+                    </span>
+                    <MudButton Href="@($"orders/{order.Id}")" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" Class="order-row__view"
+                               aria-label="@($"View details of order {OrderNumber.Format(order.Id)}")">View Details</MudButton>
+                    <a href="@($"orders/{order.Id}")" class="order-row__chevron" tabindex="-1" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.ChevronRight" /></a>
+                </li>
+            }
+        </ul>
+        @if (_token is not null)
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Class="mt-3" OnClick="LoadMoreAsync" Disabled="_loading">
+                @(_loading ? "Loading…" : "Load more")
+            </MudButton>
+        }
+    }
+</LoadState>
+
+@code {
+    private static readonly (string Value, string Label)[] Ranges =
+    [
+        ("30d", "Last 30 days"), ("3m", "Last 3 months"), ("6m", "Last 6 months"), ("12m", "Last 12 months"), ("all", "All time"), ("custom", "Custom range")
+    ];
+
+    private readonly List<OrderSummaryDto> _orders = [];
+    private OrderStatsDto? _stats;
+    private string? _orderSearch;
+    private string _range = "30d";
+    private string _status = "";
+    private string? _from;
+    private string? _to;
+    private string? _token;
+    private string? _rangeError;
+    private ApiProblem? _problem;
+    private bool _loading;
+    private (DateTimeOffset? From, DateTimeOffset? To, string? OrderId, OrderStatus? Status) _applied;
+
+    protected override async Task OnInitializedAsync()
+    {
+        TimeZone.Changed += OnZoneChanged;
+        var stats = OrdersApi.GetStatsAsync();
+        await SearchAsync();
+        _stats = (await stats).Value;
+    }
+
+    private async Task SearchAsync()
+    {
+        _rangeError = null;
+        if (!TryResolveRange(out var from, out var to)) return;
+        var status = Enum.TryParse<OrderStatus>(_status, out var s) ? s : (OrderStatus?)null;
+        _applied = (from, to, _orderSearch, status);
+        _orders.Clear();
+        _token = null;
+        await LoadAsync(null);
+    }
+
+    // Users think in calendar days in their chosen zone; the API filters on UTC instants. "To" is inclusive for the user,
+    // so we send the start of the following day as the exclusive upper bound.
+    private bool TryResolveRange(out DateTimeOffset? from, out DateTimeOffset? to)
+    {
+        from = null;
+        to = null;
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZone.Zone));
+        switch (_range)
+        {
+            case "30d": from = TimeZone.StartOfDay(today.AddDays(-29)); return true;
+            case "3m": from = TimeZone.StartOfDay(today.AddMonths(-3)); return true;
+            case "6m": from = TimeZone.StartOfDay(today.AddMonths(-6)); return true;
+            case "12m": from = TimeZone.StartOfDay(today.AddMonths(-12)); return true;
+            case "custom":
+                DateOnly? f = DateOnly.TryParse(_from, out var fd) ? fd : null;
+                DateOnly? t = DateOnly.TryParse(_to, out var td) ? td : null;
+                if (f is not null && t is not null && f > t)
+                {
+                    _rangeError = "The 'from' date must be on or before the 'to' date.";
+                    return false;
+                }
+                from = f is null ? null : TimeZone.StartOfDay(f.Value);
+                to = t is null ? null : TimeZone.StartOfDay(t.Value.AddDays(1));
+                return true;
+            default: return true; // all time
+        }
+    }
+
+    private Task LoadMoreAsync() => LoadAsync(_token);
+    private Task ReloadAsync() => LoadAsync(_token);
+
+    private async Task LoadAsync(string? token)
+    {
+        _loading = true;
+        _problem = null;
+        var result = await OrdersApi.ListAsync(_applied.From, _applied.To, token, 10, _applied.OrderId, _applied.Status);
+        _loading = false;
+        if (!result.IsSuccess)
+        {
+            _problem = result.Problem;
+            return;
+        }
+        _orders.AddRange(result.Value!.Items);
+        _token = result.Value.ContinuationToken;
+    }
+
+    private async Task CopyAsync(Guid id)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", OrderNumber.Format(id));
+            Snackbar.Add($"Copied {OrderNumber.Format(id)}", Severity.Success);
+        }
+        catch (JSException)
+        {
+            Snackbar.Add("Could not copy the order number.", Severity.Warning);
+        }
+    }
+
+    private void OnZoneChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => TimeZone.Changed -= OnZoneChanged;
+}
